@@ -68,6 +68,10 @@ En producción: `npm run build`, y después `npm run start:prod` y `npm run star
 | `POST /api/auth/login` | Público | Login del administrador → JWT |
 | `POST /graphql` · `uploadDocuments` | **Administrador** | Carga de documentos |
 | `POST /graphql` · `uploadLimits` | Público | Límites de carga |
+| `GET /api/documents?query=&page=&pageSize=` | Público | Búsqueda full-text paginada, por relevancia y con fragmentos resaltados |
+| `GET /api/documents/:id` | Público | Metadatos y estado del documento |
+| `GET /api/documents/:id/status` | Público | Estado actual (`PROCESANDO` / `INDEXADO` / `ERROR`) |
+| `GET /api/documents/:id/original` | Público | Archivo original para verlo en el navegador (`?download=1` para descargarlo) |
 
 ### Variables de entorno (`backend/.env`)
 
@@ -136,6 +140,57 @@ Cada archivo del lote se acepta o se rechaza por separado. Un archivo rechazado 
 | Más archivos que `MAX_FILES_PER_UPLOAD` | HTTP 413 |
 | Metadatos inválidos o número de archivos ≠ número de metadatos | `errors[0].extensions.code = "BAD_REQUEST"` |
 
+### Buscar
+
+```bash
+curl "http://localhost:3000/api/documents?query=prometheus&page=1&pageSize=10"
+```
+
+```json
+{
+  "items": [{
+    "id": "a096138f-…", "title": "Observabilidad",
+    "titleHighlight": [{ "text": "Observabilidad", "match": false }],
+    "snippets": [[
+      { "text": "Métricas con ", "match": false },
+      { "text": "Prometheus", "match": true },
+      { "text": " y Grafana", "match": false }
+    ]],
+    "author": "SRE", "category": "Guia", "tags": ["monitoreo"], "version": "1.0",
+    "mimeType": "application/pdf", "contentIndexed": true, "rank": 0.2, "…": "…"
+  }],
+  "total": 1, "page": 1, "pageSize": 10
+}
+```
+
+Sintaxis de `query`, la misma de los buscadores web (`websearch_to_tsquery`):
+
+| Ejemplo | Significado |
+|---|---|
+| `nginx proxy` | Ambos términos |
+| `"instalación del servidor"` | Frase exacta |
+| `grafana or kibana` | Cualquiera de los dos |
+| `servidor -correo` | Excluye el término |
+
+- Busca en el título, los metadatos (autor, categoría, versión y etiquetas) y el **contenido extraído**. Una coincidencia en el título pesa más que en los metadatos, y esta más que en el contenido.
+- Una búsqueda vacía, sin resultados o compuesta solo de signos devuelve `items: []` sin error. `pageSize` va de 1 a 50 (por defecto 10) y `query` admite hasta 200 caracteres.
+- Las coincidencias se devuelven como **segmentos** `{ text, match }`, no como HTML, para que el cliente las pinte sin riesgo de XSS.
+- La cabecera `Server-Timing: db;dur=…` indica el tiempo de la consulta en la base de datos.
+- Solo aparecen documentos `INDEXADO`. Los que tienen `contentIndexed: false` se encuentran solo por título y metadatos, y no tienen fragmentos.
+
+### Detalle y archivo original
+
+```bash
+curl http://localhost:3000/api/documents/<id>            # metadatos y estado
+curl -I http://localhost:3000/api/documents/<id>/original
+# Content-Type: application/pdf
+# Content-Disposition: inline; filename="manual.pdf"; filename*=UTF-8''manual.pdf
+# X-Content-Type-Options: nosniff
+# Accept-Ranges: bytes
+```
+
+El original se sirve `inline` para mostrarlo embebido (PDF en el visor del navegador; MD y TXT como texto UTF-8). Admite peticiones parciales (`Range`) y `?download=1` para descargarlo. La API nunca expone la ruta física del archivo.
+
 ### Consultar los límites de carga
 
 ```bash
@@ -150,7 +205,7 @@ Requieren `docker compose up -d`, porque las e2e usan PostgreSQL real.
 ```bash
 cd backend
 npm test            # unitarias
-npm run test:e2e    # integración: login, GraphQL multipart, PostgreSQL, cola y worker
+npm run test:e2e    # integración: login, carga, cola y worker, búsqueda, detalle y original
 npm run lint
 ```
 
@@ -163,9 +218,10 @@ npm run lint
 │   │   ├── auth/          # login del administrador, JWT, guard
 │   │   ├── common/        # configuración y health check
 │   │   ├── database/      # configuración TypeORM y migraciones SQL
-│   │   ├── documents/     # entidad, carga, validación de archivos, DTOs
+│   │   ├── documents/     # entidad, carga, detalle, original, validación de archivos, DTOs
 │   │   ├── graphql/       # resolvers GraphQL
 │   │   ├── indexing/      # cola BullMQ, worker, extracción de texto e indexación
+│   │   ├── search/        # consulta full-text, ranking y resaltado
 │   │   ├── main.ts        # entrada de la API
 │   │   └── worker.ts      # entrada del worker
 │   └── test/              # pruebas e2e
@@ -184,8 +240,9 @@ npm run lint
 | HU-01 | Persistencia en PostgreSQL | ✅ Implementada |
 | HU-01 | Login de administrador para autorizar la carga | ✅ Implementada |
 | HU-01 | Cola de indexación (BullMQ) y extracción de texto TXT/MD/PDF | ✅ Implementada |
-| HU-02 | Búsqueda full-text paginada con resaltado | ⏳ Pendiente |
-| HU-03 | Visor de documentos y detalle | ⏳ Pendiente |
+| HU-02 | Búsqueda full-text paginada con resaltado (API) | ✅ Implementada |
+| HU-03 | Detalle y archivo original para el visor (API) | ✅ Implementada |
+| HU-03 | Visor en la interfaz | ⏳ Pendiente |
 | HU-04 | Notificaciones en tiempo real (SSE) | ⏳ Pendiente |
 | — | Frontend | ⏳ Pendiente |
 | — | Medición de latencia de búsqueda | ⏳ Pendiente |
@@ -207,3 +264,5 @@ Además de lo que pide el enunciado de la prueba, se aplican estas aclaraciones 
 - **Sin OCR:** un PDF escaneado sin capa de texto se encuentra solo por título y metadatos (`content_indexed = false`).
 - Un documento con demasiadas palabras distintas (más de 1 MB de índice, el límite de PostgreSQL para un `tsvector`) termina en `ERROR`. Un texto técnico realista de 10 MB cabe sin problema.
 - El Markdown se indexa como texto: los símbolos de formato no generan términos de búsqueda.
+- Los fragmentos resaltados se calculan sobre los primeros 50 000 caracteres de cada documento. Una coincidencia posterior encuentra el documento, pero su fragmento muestra el inicio sin resaltar.
+- Diccionario `simple` (sin *stemming*): `documento` no encuentra `documentos`.

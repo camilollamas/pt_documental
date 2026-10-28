@@ -35,6 +35,7 @@ Solo con el visto bueno del desarrollador se pasa al siguiente bloque.
 | Auditoría de estructura | Pide una **auditoría** del repositorio contra el punto 5 del enunciado. Crea el repositorio remoto y ordena adelantar la documentación obligatoria | Contrasta la estructura, detecta la documentación faltante, el `.gitignore` sin versionar y un mensaje de commit truncado, y propone correcciones |
 | Bloque 2b: login del administrador | Valida el diseño de autenticación. Decide **no reescribir** el historial de Git, priorizando avanzar | Genera el módulo de autenticación, el script de hash y las pruebas. Detecta que el guard actúa después de recibir los archivos y añade un middleware previo |
 | Bloque 2c: cola e indexación | Ejecuta las pruebas e2e del bloque anterior y aporta la evidencia antes de autorizar el avance. **Decide el tratamiento de los documentos sin texto extraíble** (PDF escaneado): rechaza dejarlos en `ERROR`, que era la propuesta inicial, y pide indexarlos por metadatos **marcados** para poder identificarlos. Ese cambio introdujo la segunda migración (`content_indexed`). Se le ofreció escribir la prueba "PDF dañado → `ERROR` sin detener el worker" y delegó su redacción en la IA | Genera la cola BullMQ, el worker separado, la extracción con `unpdf` y la indexación con pesos A/B/C. Detecta y corrige dos fallos propios: la concurrencia leída antes de cargar `.env` y un log de "indexado" que no comprobaba las filas afectadas. Verifica el límite de 1 MB del `tsvector` en PostgreSQL antes de documentarlo. Escribe, a petición del desarrollador, la prueba del PDF dañado dentro de un lote con un documento válido |
+| Bloque 3: búsqueda, detalle y original | Autoriza el bloque | Genera la consulta FTS (`websearch_to_tsquery`, `ts_rank_cd`, `ts_headline` paginado), el resaltado por segmentos, los endpoints de detalle, estado y original, y 19 pruebas e2e. Al verificar en psql descubre que `ts_headline` no escapa HTML, lo que confirma el diseño de segmentos. Una prueba demasiado ingenua (detectaba "LIKE" en un comentario) se corrige, y se comprueba con una mutación que sigue detectando un `ILIKE` real |
 
 ## 3. Prompts clave y cómo se refinaron
 
@@ -88,6 +89,8 @@ Los prompts se muestran resumidos y con la redacción limpiada; el sentido es el
 - El worker registraba "indexado" aunque el `UPDATE` no afectara ninguna fila. Ahora comprueba el número de filas afectadas.
 - Una limitación documentada sobre Redis caído no estaba comprobada y se reformuló para que solo diga lo verificado.
 - La IA filtraba la salida de las pruebas para mostrar solo los totales, y eso ocultaba un aviso de la consola. Lo detectó el desarrollador al ejecutar las pruebas por su cuenta.
+- Dos pruebas de búsqueda partían de supuestos incorrectos: que el fragmento incluiría un texto concreto y que un comentario no contaría como uso de `LIKE`. Se corrigieron tras analizar la salida real de `ts_headline` en psql.
+- Al detener una prueba manual, un proceso de la API quedó vivo unos segundos. Se verificó por puerto y por línea de comandos que no quedara ningún proceso.
 
 ### Verificaciones ejecutadas por el desarrollador
 *(Registrar aquí las verificaciones que el desarrollador ejecute personalmente: comando, fecha y resultado.)*

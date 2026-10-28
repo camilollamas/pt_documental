@@ -12,7 +12,7 @@ flowchart LR
 
     subgraph API["Backend · NestJS"]
         GQL["GraphQL /graphql<br/>uploadDocuments ✅"]
-        REST["REST /api<br/>health ✅ · auth/login ✅<br/>búsqueda, detalle, original (pendiente)"]
+        REST["REST /api<br/>health ✅ · auth/login ✅<br/>búsqueda ✅ · detalle ✅ · original ✅ · status ✅"]
         SSE["SSE /api/events<br/>(pendiente)"]
     end
 
@@ -36,6 +36,7 @@ flowchart LR
     W -. "publica evento" .-> RQ
     RQ -. "suscripción" .-> SSE
     REST -- "@@ tsquery (FTS)" --> PG
+    REST -- "sendFile inline" --> FS
 ```
 
 Líneas continuas: implementado. Líneas punteadas: pendiente.
@@ -57,6 +58,17 @@ Líneas continuas: implementado. Líneas punteadas: pendiente.
 9. ✅ El worker (proceso separado) toma el trabajo, lee el original, extrae el texto y, en un solo `UPDATE`, guarda el texto y el `search_vector` y cambia el estado a `INDEXADO`. Ante un fallo del propio documento, el estado pasa a `ERROR` con su causa.
 10. *(pendiente)* El worker publica el cambio de estado y la API lo notifica por SSE.
 
+### Flujo de búsqueda y visor (HU-02, HU-03)
+
+1. `GET /api/documents?query=…&page=…&pageSize=…` → `ValidationPipe` (query ≤ 200 caracteres, página ≤ 1000, tamaño ≤ 50).
+2. Una sola consulta SQL parametrizada:
+   1. la CTE `page` filtra `status = 'INDEXADO' AND search_vector @@ websearch_to_tsquery('simple', $1)` con el índice GIN;
+   2. ordena por `ts_rank_cd DESC, created_at DESC, id DESC` y calcula el total con `count(*) OVER ()`;
+   3. aplica `LIMIT/OFFSET`;
+   4. **solo para las filas de la página** calcula `ts_headline` del título y del contenido.
+3. Los marcadores de `ts_headline` (caracteres de control) se convierten en segmentos `{ text, match }`.
+4. Detalle: `GET /api/documents/:id` (metadatos y estado). Visor: `GET /api/documents/:id/original` sirve el archivo `inline` con su tipo real.
+
 ### Responsabilidad de los módulos
 
 | Módulo | Responsabilidad | Estado |
@@ -67,7 +79,8 @@ Líneas continuas: implementado. Líneas punteadas: pendiente.
 | `graphql/` | Resolvers GraphQL (`uploadDocuments`, `uploadLimits`) | ✅ |
 | `auth/` | Login del administrador, emisión y verificación de JWT, guard GraphQL, límite de intentos | ✅ |
 | `indexing/` | Cola BullMQ, worker (`worker.ts`), extracción TXT/MD/PDF, construcción del `tsvector`, reintentos y reconciliación | ✅ |
-| `search/` | Consultas FTS parametrizadas, ranking y resaltado | ⏳ |
+| `search/` | Consulta FTS parametrizada, ranking, paginación y resaltado seguro | ✅ |
+| `documents/` (lectura) | Detalle, estado y archivo original (`DocumentsController`) | ✅ |
 | `events/` | Redis Pub/Sub → SSE | ⏳ |
 
 **Estilo de arquitectura:** modular por capas, con un módulo NestJS por capacidad (resolver/controlador → servicio → repositorio) y un worker en proceso separado. Se descartó una arquitectura hexagonal completa (puertos y adaptadores para cada dependencia): para un alcance de un día añade interfaces de una sola implementación sin beneficio práctico. La separación por módulos ya aísla las responsabilidades y permite extraer el worker o el motor de búsqueda más adelante.
@@ -170,7 +183,31 @@ El enunciado define el actor de HU-01 como "Administrador / Desarrollador" y el 
 - ✅ **Diccionario `simple`:** normaliza a minúsculas sin stemming ni stopwords. Un corpus técnico mezcla español, inglés y términos propios (`k8s`, `pg_dump`, nombres de API) que un diccionario de idioma podría recortar o descartar. Limitación: "documento" no coincide con "documentos", y las palabras vacías ("de", "la") también se indexan.
 - **Límite de PostgreSQL:** un `tsvector` ocupa como máximo 1 MB (SQLSTATE `54000`). Medido: 10 MB de texto con 20 000 términos distintos se indexan sin problema; unas 300 000 palabras distintas lo superan, y el documento pasa a `ERROR` con su causa.
 - **Sin texto extraíble:** el vector contiene solo los lexemas A y B (título y metadatos), y `content_indexed = false`.
-- *(pendiente)* Consulta con `websearch_to_tsquery`, ranking `ts_rank_cd` y fragmentos con `ts_headline`. Verificado de forma manual: encuentra términos dentro del PDF, la frase exacta `"pg_dump y restauración"` y etiquetas.
+### Búsqueda: consulta, relevancia, fragmentos y paginación
+
+| Decisión | Alternativa | Motivo |
+|---|---|---|
+| `websearch_to_tsquery('simple', $1)` | `to_tsquery`, `plainto_tsquery` | Acepta texto de usuario **sin errores de sintaxis** y admite `"frase exacta"`, `OR` y `-exclusión`. `to_tsquery` falla ante entradas como `a & \|`; `plainto_tsquery` no admite frases ni operadores |
+| Relevancia con `ts_rank_cd` (*cover density*) | `ts_rank` | Además de la frecuencia y los pesos A/B/C, premia que los términos aparezcan cerca entre sí. Verificado: un documento con el término en el título queda por encima de otro que solo lo tiene en el contenido |
+| Orden `rank DESC, created_at DESC, id DESC` | Solo `rank` | A igual relevancia el orden queda indefinido y una fila podría repetirse o desaparecer entre páginas. Con el desempate por `id` es total y estable (verificado: 25 resultados en 3 páginas sin solapes) |
+| `count(*) OVER ()` en la misma consulta | Una segunda consulta `COUNT` | Un solo viaje a la base de datos. Si la página está fuera de rango, se cuenta aparte para devolver el total real |
+| `ts_headline` **solo para las filas de la página** (CTE) | Para todas las coincidencias | `ts_headline` vuelve a analizar el texto y es lo más caro de la consulta. Calcularlo para 10 filas en vez de miles mantiene la latencia acotada |
+| `ts_headline` sobre los primeros **50 000 caracteres** | El texto completo | Acota el coste por fila en documentos de varios MB. Límite: una coincidencia más allá encuentra el documento (el filtro usa el índice completo), pero su fragmento muestra el inicio sin resaltar |
+| **Marcadores de control** (`\u0002`/`\u0003`) → segmentos `{ text, match }` | `<b>…</b>` de `ts_headline` insertado como HTML | **Comprobado en psql: `ts_headline` no escapa HTML.** Devuelve `<img src=x onerror=alert(2)>` tal cual e incluso puede cortar una etiqueta a la mitad. Insertarlo con `innerHTML` sería XSS. Con segmentos, el cliente pinta `<mark>` como nodos de texto |
+| `LIMIT/OFFSET` con página máxima 1000 | Paginación por cursor (*keyset*) | Para resultados ordenados por relevancia, el cursor exigiría arrastrar `(rank, created_at, id)`. `OFFSET` es suficiente para el volumen esperado y el tope evita consultas costosas muy profundas |
+| Solo documentos `INDEXADO` | Mostrar también los `PROCESANDO` | Un documento sin índice no puede coincidir. El estado de los que se están procesando se consulta en `/status` |
+| Cabecera `Server-Timing: db;dur=…` | Solo registros en el servidor | Separa el tiempo de base de datos de la latencia HTTP total, como pide la medición de rendimiento; se ve también en las herramientas del navegador |
+| Prueba que impide `LIKE`/`ILIKE` en `src/search` y `src/documents` | Revisión manual | Requisito duro del enunciado. La prueba ignora los comentarios y se verificó que falla al introducir un `ILIKE` |
+
+### Archivo original para el visor
+
+| Decisión | Motivo |
+|---|---|
+| `res.sendFile` | Aporta `Range` (206; PDF.js carga por partes), `ETag` y `Last-Modified` sin código propio. Verificado: `bytes=2-5` → 206 |
+| `Content-Type` desde `mime_type` validado en la carga (texto con `charset=utf-8`) | El tipo lo decide el backend, no la extensión del archivo en disco (que no tiene) |
+| `Content-Disposition: inline` + `filename*` (RFC 6266) | El navegador lo muestra en lugar de descargarlo. Los nombres con tildes se conservan; `?download=1` lo convierte en `attachment` |
+| `X-Content-Type-Options: nosniff` | El navegador no "adivina" HTML en un `.txt` subido |
+| Ruta física nunca expuesta; archivo resuelto por `id` → `storage_path` | Sin *path traversal*: el cliente nunca indica una ruta |
 - Índice `(created_at DESC, id DESC)` para listados y como desempate estable de la paginación.
 
 ### Latencia objetivo (400–1000 ms) *(pendiente)*
@@ -205,6 +242,9 @@ Diseño previsto:
 - Límite de intentos de login en memoria por instancia (ver modelo de permisos).
 - No hay revocación de tokens antes de su caducidad.
 - Sin OCR: un PDF escaneado solo se encuentra por título y metadatos (`content_indexed = false`).
+- Los fragmentos resaltados solo cubren los primeros 50 000 caracteres de cada documento.
+- Sin *stemming* (diccionario `simple`): no hay coincidencia entre singular y plural.
+- La latencia de búsqueda todavía no se ha medido con un volumen representativo (pendiente de la etapa de medición).
 - La reconciliación de documentos atascados ocurre solo al arrancar el worker, no de forma periódica.
 - No se ha probado la carga con Redis caído. Por diseño, el documento queda registrado y se recupera con la reconciliación, pero no se ha medido cuánto tarda en responder `queue.add` mientras Redis no está disponible.
 - Las migraciones se ejecutan al arrancar la API; no es apto para varias réplicas sin un paso de despliegue dedicado.
