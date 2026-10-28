@@ -97,7 +97,7 @@ API_URL=http://localhost:3100 npm run dev     # PowerShell: $env:API_URL="http:/
 | Buscar | `/buscar?q=&page=` | Público. La consulta vive en la URL: se puede compartir y recargar |
 | Detalle y visor | `/documentos/:id` | Público. PDF original embebido; Markdown renderizado; TXT preformateado |
 | Iniciar sesión | `/login` | Público (solo existe el administrador) |
-| Cargar | `/cargar` | Administrador; sin sesión redirige al login |
+| Cargar | `/cargar` | Administrador; sin sesión redirige al login. Arrastrar y soltar o elegir archivos, metadatos por lote y por archivo, estado en vivo por SSE |
 
 ### Variables de entorno (`backend/.env`)
 
@@ -292,7 +292,9 @@ npm run build       # comprobación de tipos + build de producción
 │       ├── features/
 │       │   ├── auth/      # sesión del administrador, login, ruta protegida
 │       │   ├── documents/ # detalle: cajetín y visor
-│       │   └── search/    # búsqueda y paginación
+│       │   ├── events/    # estado en vivo por SSE (useDocumentStatuses)
+│       │   ├── search/    # búsqueda y paginación
+│       │   └── upload/    # carga: zona de arrastre, validación y resultados en vivo
 │       ├── lib/           # formatos (tamaños, fechas)
 │       ├── services/      # cliente de la API
 │       └── styles/        # tokens del sistema de diseño Cajetín
@@ -316,9 +318,9 @@ npm run build       # comprobación de tipos + build de producción
 | HU-02 | Búsqueda en la interfaz (resaltado, paginación, URL compartible) | ✅ Implementada |
 | HU-03 | Visor en la interfaz (cajetín, PDF original embebido, Markdown y TXT) | ✅ Implementada |
 | — | Login del administrador en la interfaz | ✅ Implementado |
-| HU-01 | Carga en la interfaz (arrastrar y soltar, metadatos) | ⏳ Pendiente (Bloque 5b) |
+| HU-01 | Carga en la interfaz (arrastrar y soltar, metadatos, validación con los límites de la API) | ✅ Implementada |
 | HU-04 | Notificaciones en tiempo real (SSE + Redis Pub/Sub, sin polling) (API) | ✅ Implementada |
-| HU-04 | Actualización reactiva en la interfaz | ⏳ Pendiente (Bloque 5b) |
+| HU-04 | Actualización reactiva en la interfaz (carga y detalle, sin polling) | ✅ Implementada |
 | — | Medición de latencia de búsqueda | ⏳ Pendiente |
 
 ## Alcance: enunciado y aclaraciones posteriores

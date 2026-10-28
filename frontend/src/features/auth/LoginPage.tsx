@@ -7,7 +7,7 @@ import { useAuth } from './auth-context';
 
 /** Login del administrador único. No hay registro ni recuperación de contraseña. */
 export function LoginPage() {
-  const { session, login } = useAuth();
+  const { session, expired, login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [error, setError] = useState<string | null>(null);
@@ -38,6 +38,11 @@ export function LoginPage() {
         <h1 className="font-display text-[32px] leading-[38px] font-semibold tracking-[-0.01em]">Iniciar sesión</h1>
         <p className="text-ink-muted">Acceso del administrador para subir documentos. La búsqueda no requiere sesión.</p>
       </div>
+      {expired && !error && (
+        <Alert tone="warning" title="La sesión caducó">
+          Inicie sesión de nuevo para subir los documentos. Los archivos elegidos no se enviaron.
+        </Alert>
+      )}
       {error && (
         <Alert tone="error" title={error}>
           Revise el usuario y la contraseña. Tras 5 intentos fallidos deberá esperar un minuto.

@@ -7,7 +7,7 @@
 ```mermaid
 flowchart LR
     subgraph Cliente
-        UI["Frontend · React + Vite + Tailwind<br/>búsqueda, visor, login ✅<br/>carga y SSE (pendiente)"]
+        UI["Frontend · React + Vite + Tailwind ✅<br/>buscar · visor · login · cargar · estado en vivo"]
     end
 
     subgraph API["Backend · NestJS"]
@@ -24,9 +24,9 @@ flowchart LR
 
     W["Worker de indexación ✅<br/>proceso separado"]
 
-    UI -. "multipart (archivos + metadatos)" .-> GQL
+    UI -- "multipart (archivos + metadatos)" --> GQL
     UI -- "login / búsqueda / detalle / original" --> REST
-    UI -. "EventSource" .-> SSE
+    UI -- "EventSource ?ids=" --> SSE
     GQL --> FS
     GQL -- "INSERT PROCESANDO" --> PG
     GQL -- "encola documentId" --> RQ
@@ -231,6 +231,12 @@ El objetivo se interpreta como un máximo de 1 s: una respuesta más rápida cum
 | **JWT en `sessionStorage`** | Cookie `httpOnly`; memoria | Sobrevive a recargar la pestaña y se borra al cerrarla. Riesgo asumido: un XSS podría leerlo. Se mitiga al no insertar nunca HTML del documento; una cookie `httpOnly` exigiría protección CSRF propia en la API |
 | `RequireAdmin` + "Cargar" visible solo con sesión | Mostrar y fallar con 401 | La interfaz refleja el permiso real; la API lo hace cumplir de todos modos |
 | Pruebas con Testing Library + `fetch` simulado sobre la **app completa** (rutas + sesión) | Pruebas de componentes aislados | Prueban lo que ve el usuario: roles, textos y enlaces, igual que con un lector de pantalla |
+| **Validación previa a la carga con `uploadLimits`** (extensión, tamaño, vacío, máximo por lote) | Límites escritos en el frontend; validar solo en el servidor | Un solo origen para los límites y respuesta inmediata con el motivo de cada rechazo. El atributo `accept` del selector no filtra lo que se **arrastra**, así que el código valida siempre. El servidor revalida y comprueba el contenido real |
+| **Autor y categoría comunes al lote; título, versión y etiquetas por archivo** | Todos los campos por archivo | En una carga masiva el autor y la categoría suelen coincidir; escribirlos diez veces invita a errores. El contrato de la API sigue siendo por documento, así que cambiar esta decisión solo afecta a la interfaz |
+| `useDocumentStatuses(ids)`: un `EventSource` por vista con `?ids=` y **el evento de `updatedAt` más reciente** por documento | Una conexión por documento; aplicar en orden de llegada | Una sola conexión sigue todo el lote. El orden de llegada no es cronológico (observado en el Bloque 4), así que manda `updatedAt` (función pura `applyStatus`, probada) |
+| El detalle escucha el SSE **solo mientras el documento está en `PROCESANDO`** y recarga al recibir el cambio | Escuchar siempre; actualizar campos sueltos con el evento | Ninguna conexión abierta sin necesidad. Recargar trae también `indexedAt` y deja el detalle consistente con la fuente de verdad |
+| Sesión caducada (401) → `expire()` en el contexto de sesión | Cerrar sesión y navegar al login con un estado | React Router 8 aplica la navegación como transición de baja prioridad: el cierre de sesión se procesaba antes y la ruta protegida redirigía **sin** el aviso (lo detectó una prueba). Con `expire()` el motivo vive en el contexto y el login lo lee, sin depender del orden |
+| Anuncios `aria-live` derivados del último evento | Toast visual | El lector de pantalla oye "Manual: indexado" sin interrumpir; el resumen visible del lote cambia de "N en proceso" a "Lote procesado" |
 
 ## 3. Estrategia de tiempo real
 

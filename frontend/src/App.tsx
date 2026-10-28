@@ -5,6 +5,7 @@ import { LoginPage } from './features/auth/LoginPage';
 import { RequireAdmin } from './features/auth/RequireAdmin';
 import { DocumentPage } from './features/documents/DocumentPage';
 import { SearchPage } from './features/search/SearchPage';
+import { UploadPage } from './features/upload/UploadPage';
 
 export function App() {
   return (
@@ -18,10 +19,7 @@ export function App() {
           path="cargar"
           element={
             <RequireAdmin>
-              {/* Bloque 5b: carga con arrastrar y soltar y estados en vivo. */}
-              <Alert tone="info" title="Carga de documentos">
-                La interfaz de carga se incorpora en la siguiente entrega.
-              </Alert>
+              <UploadPage />
             </RequireAdmin>
           }
         />

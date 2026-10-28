@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router';
 import { Alert } from '../../components/Alert';
 import { getDocument, type DocumentDetail } from '../../services/api';
+import { useDocumentStatuses } from '../events/useDocumentStatuses';
 import { Cajetin } from './Cajetin';
 import { DocumentViewer } from './DocumentViewer';
 
@@ -13,6 +14,12 @@ export function DocumentPage() {
   // La búsqueda de origen viaja en el estado de navegación; con un enlace directo se vuelve a Buscar.
   const backSearch = (useLocation().state as { search?: string } | null)?.search ?? '';
   const [outcome, setOutcome] = useState<Outcome | null>(null);
+  const state = outcome?.id === id ? outcome : null;
+
+  // Solo se escucha el SSE mientras el documento se procesa; al cambiar de estado se recarga el detalle.
+  const processing = state?.kind === 'done' && state.doc.status === 'PROCESANDO';
+  const live = useDocumentStatuses(processing ? [id] : [])[id];
+  const changed = live && live.status !== 'PROCESANDO' ? live.updatedAt : null;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -22,9 +29,7 @@ export function DocumentPage() {
         if (error.name !== 'AbortError') setOutcome({ id, kind: 'error', message: error.message });
       });
     return () => controller.abort();
-  }, [id]);
-
-  const state = outcome?.id === id ? outcome : null;
+  }, [id, changed]);
 
   return (
     <section className="grid gap-6">
@@ -37,6 +42,10 @@ export function DocumentPage() {
       {state?.kind === 'done' && (
         <>
           <h1 className="sr-only">{state.doc.title}</h1>
+          {/* Anuncia el cambio de estado que llega por SSE mientras el usuario está en la página. */}
+          <p aria-live="polite" className="sr-only">
+            {changed && `Estado actualizado: ${state.doc.status.toLowerCase()}`}
+          </p>
           <Cajetin doc={state.doc} />
           <DocumentViewer doc={state.doc} />
         </>

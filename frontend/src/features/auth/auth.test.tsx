@@ -20,8 +20,10 @@ describe('Sesión del administrador', () => {
   });
 
   it('con credenciales correctas entra y vuelve a la página que pidió', async () => {
-    const fetchMock = mockFetch((url, init) =>
-      url === '/api/auth/login' && init?.method === 'POST' ? json({ accessToken: fakeToken('admin'), expiresIn: '8h' }) : undefined,
+    const fetchMock = mockFetch(
+      (url, init) =>
+        url === '/api/auth/login' && init?.method === 'POST' ? json({ accessToken: fakeToken('admin'), expiresIn: '8h' }) : undefined,
+      (url) => (url === '/graphql' ? json({ data: { uploadLimits: { maxFileBytes: 1024, maxFiles: 3, allowedExtensions: ['.pdf'] } } }) : undefined),
     );
     renderApp('/cargar');
 
@@ -29,7 +31,7 @@ describe('Sesión del administrador', () => {
     await userEvent.type(screen.getByLabelText('Contraseña'), 'clave-correcta');
     await userEvent.click(screen.getByRole('button', { name: 'Iniciar sesión' }));
 
-    expect(await screen.findByText('Carga de documentos')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Cargar documentos', level: 1 })).toBeInTheDocument();
     expect(within(header()).getByRole('link', { name: 'Cargar' })).toHaveAttribute('aria-current', 'page');
     expect(within(header()).getByText('admin')).toBeInTheDocument();
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ username: 'admin', password: 'clave-correcta' });

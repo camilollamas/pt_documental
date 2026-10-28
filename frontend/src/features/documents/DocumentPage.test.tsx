@@ -1,6 +1,7 @@
 import { screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { DocumentDetail } from '../../services/api';
+import { FakeEventSource } from '../../test/fake-event-source';
 import { json, mockFetch, renderApp } from '../../test/render';
 
 const ID = '25adf9fb-31bf-43e8-b2ed-5f21a1daaab5';
@@ -81,6 +82,28 @@ describe('Detalle del documento', () => {
     mockFetch(...routes(detail({ status: 'ERROR', contentIndexed: false, errorMessage: 'El PDF está dañado o no se puede leer', indexedAt: null })));
     renderApp(`/documentos/${ID}`);
     expect(await screen.findByText('El PDF está dañado o no se puede leer')).toBeInTheDocument();
+  });
+
+  it('actualiza el estado en vivo mientras el documento se procesa (SSE) y recarga el detalle', async () => {
+    FakeEventSource.install();
+    let calls = 0;
+    mockFetch((url) => {
+      if (url !== `/api/documents/${ID}`) return undefined;
+      calls++;
+      return json(calls === 1 ? detail({ status: 'PROCESANDO', contentIndexed: false, indexedAt: null }) : detail());
+    });
+    renderApp(`/documentos/${ID}`);
+
+    expect(await screen.findByText('Procesando')).toBeInTheDocument();
+    const source = FakeEventSource.last;
+    expect(source.url).toBe(`/api/events?ids=${ID}`);
+
+    source.emit('status', { id: ID, status: 'INDEXADO', contentIndexed: true, errorMessage: null, updatedAt: '2026-10-28T15:07:31.696Z' });
+
+    expect(await screen.findByText('Indexado')).toBeInTheDocument();
+    expect(calls).toBe(2);
+    // Ya no se procesa: deja de escuchar.
+    expect(source.closed).toBe(true);
   });
 
   it('informa si el documento no existe', async () => {

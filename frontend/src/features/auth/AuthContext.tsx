@@ -25,6 +25,7 @@ function decodeToken(token: string): { sub: string; exp: number } {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(readSession);
+  const [expired, setExpired] = useState(false);
 
   const login = useCallback(async (username: string, password: string) => {
     const { accessToken } = await loginRequest(username, password);
@@ -32,13 +33,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const next = { token: accessToken, username: sub, expiresAt: exp * 1000 };
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     setSession(next);
+    setExpired(false);
   }, []);
 
-  const logout = useCallback(() => {
+  const end = useCallback((reason: 'logout' | 'expired') => {
     sessionStorage.removeItem(STORAGE_KEY);
     setSession(null);
+    setExpired(reason === 'expired');
   }, []);
+  const logout = useCallback(() => end('logout'), [end]);
+  // Las rutas protegidas reaccionan solas (RequireAdmin → /login); el login lee `expired` para explicarlo.
+  const expire = useCallback(() => end('expired'), [end]);
 
-  const value = useMemo(() => ({ session, login, logout }), [session, login, logout]);
+  const value = useMemo(() => ({ session, expired, login, logout, expire }), [session, expired, login, logout, expire]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
