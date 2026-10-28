@@ -101,7 +101,12 @@ describe('Autenticación del administrador', () => {
           .post('/api/auth/login')
           .send({ ...ADMIN, password: 'incorrecta' });
       for (let i = 0; i < 3; i++) await attempt().expect(401);
-      await attempt().expect(429);
+      const blocked = await attempt().expect(429);
+      expect(blocked.body).toEqual({
+        statusCode: 429,
+        error: 'Demasiadas solicitudes',
+        message: 'Demasiados intentos de inicio de sesión. Espere un minuto y vuelva a intentarlo.',
+      });
       // Bloqueado incluso con la contraseña correcta hasta que pase la ventana.
       await request(limited.getHttpServer()).post('/api/auth/login').send(ADMIN).expect(429);
     } finally {

@@ -1,18 +1,10 @@
-import {
-  Controller,
-  Get,
-  NotFoundException,
-  Param,
-  ParseUUIDPipe,
-  Query,
-  Res,
-} from '@nestjs/common';
+import { Controller, Get, NotFoundException, Param, Query, Res } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import type { Response } from 'express';
-import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { Repository } from 'typeorm';
-import { appConfig } from '../common/config.js';
+import { DocumentIdPipe } from '../common/error-handling.js';
+import { FileStorage } from '../common/file-storage.js';
 import { SearchQueryDto } from '../search/search-query.dto.js';
 import { SearchService } from '../search/search.service.js';
 import { DocumentEntity } from './document.entity.js';
@@ -24,6 +16,7 @@ export class DocumentsController {
   constructor(
     private readonly searchService: SearchService,
     @InjectRepository(DocumentEntity) private readonly documents: Repository<DocumentEntity>,
+    private readonly storage: FileStorage,
   ) {}
 
   @Get()
@@ -39,12 +32,12 @@ export class DocumentsController {
   }
 
   @Get(':id')
-  async detail(@Param('id', ParseUUIDPipe) id: string) {
+  async detail(@Param('id', DocumentIdPipe) id: string) {
     return toDocumentView(await this.findOrFail(id));
   }
 
   @Get(':id/status')
-  async status(@Param('id', ParseUUIDPipe) id: string) {
+  async status(@Param('id', DocumentIdPipe) id: string) {
     return toStatusView(await this.findOrFail(id));
   }
 
@@ -54,7 +47,7 @@ export class DocumentsController {
    */
   @Get(':id/original')
   async original(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', DocumentIdPipe) id: string,
     @Query('download') download: string | undefined,
     @Res() res: Response,
   ) {
@@ -66,9 +59,10 @@ export class DocumentsController {
     // El navegador respeta el tipo declarado y no intenta "adivinar" HTML en un .txt.
     res.setHeader('X-Content-Type-Options', 'nosniff');
 
-    res.sendFile(join(appConfig().storageDir, doc.storagePath), (error) => {
+    res.sendFile(this.storage.localPath(doc.storagePath), (error) => {
       if (error && !res.headersSent) {
-        res.status(404).json({ statusCode: 404, message: 'El archivo original no está disponible' });
+        // Mismo formato que HttpErrorFilter: este error ocurre fuera del ciclo de Nest (callback de sendFile).
+        res.status(404).json({ statusCode: 404, error: 'No encontrado', message: 'El archivo original no está disponible' });
       }
     });
   }
@@ -83,5 +77,10 @@ export class DocumentsController {
 /** RFC 6266: nombre ASCII de respaldo + nombre UTF-8 completo en filename*. */
 function contentDisposition(filename: string, attachment: boolean): string {
   const ascii = filename.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
-  return `${attachment ? 'attachment' : 'inline'}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+  return `${attachment ? 'attachment' : 'inline'}; filename="${ascii}"; filename*=UTF-8''${rfc5987(filename)}`;
+}
+
+/** encodeURIComponent deja ' ( ) * sin escapar y RFC 5987 no los admite en `filename*`. */
+function rfc5987(value: string): string {
+  return encodeURIComponent(value).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
 }

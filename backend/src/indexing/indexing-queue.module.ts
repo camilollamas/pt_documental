@@ -1,6 +1,7 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { appConfig } from '../common/config.js';
+import { redisOptions } from '../common/redis.js';
 
 export const INDEXING_QUEUE = 'indexing';
 
@@ -10,18 +11,8 @@ export type IndexingJob = { documentId: string };
 @Module({
   imports: [
     BullModule.forRootAsync({
-      useFactory: () => {
-        const url = new URL(appConfig().redisUrl);
-        // Opciones (no una instancia de ioredis): así BullMQ crea y cierra sus propias conexiones.
-        return {
-          connection: {
-            host: url.hostname,
-            port: Number(url.port || 6379),
-            db: Number(url.pathname.slice(1) || 0),
-            password: url.password || undefined,
-          },
-        };
-      },
+      // Opciones (no una instancia de ioredis): así BullMQ crea y cierra sus propias conexiones.
+      useFactory: () => ({ connection: redisOptions(appConfig().redisUrl) }),
     }),
     BullModule.registerQueue({
       name: INDEXING_QUEUE,

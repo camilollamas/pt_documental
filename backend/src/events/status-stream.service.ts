@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { Redis } from 'ioredis';
 import { Observable, Subject } from 'rxjs';
 import { appConfig } from '../common/config.js';
+import { redisOptions } from '../common/redis.js';
 import { DocumentStatusEvent } from './document-status-event.js';
 
 /**
@@ -13,7 +14,7 @@ export class StatusStream implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(StatusStream.name);
   private readonly subject = new Subject<DocumentStatusEvent>();
   // Una conexión en modo suscriptor no admite otros comandos: es exclusiva para Pub/Sub.
-  private readonly subscriber = new Redis(appConfig().redisUrl, { lazyConnect: true });
+  private readonly subscriber = new Redis({ ...redisOptions(appConfig().redisUrl), lazyConnect: true });
 
   readonly changes$: Observable<DocumentStatusEvent> = this.subject.asObservable();
 

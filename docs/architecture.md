@@ -74,7 +74,7 @@ Líneas continuas: implementado. Líneas punteadas: pendiente.
 
 | Módulo | Responsabilidad | Estado |
 |---|---|---|
-| `common/` | Configuración desde el entorno y health check | ✅ |
+| `common/` | Configuración desde el entorno, health check, almacenamiento de originales (`FileStorage`), conexión a Redis (`redisOptions`) y formato de errores | ✅ |
 | `database/` | Configuración de TypeORM y migraciones SQL | ✅ |
 | `documents/` | Entidad, carga y almacenamiento, validación de archivos, DTOs | ✅ |
 | `graphql/` | Resolvers GraphQL (`uploadDocuments`, `uploadLimits`) | ✅ |
@@ -113,7 +113,8 @@ Líneas continuas: implementado. Líneas punteadas: pendiente.
 | Decisión | Motivo |
 |---|---|
 | Archivos y metadatos en argumentos separados, emparejados por índice | La validación de DTOs nunca recorre los streams de los archivos (`Promise<FileUpload>`) |
-| Resultado por archivo (`id`+`status` **o** `error`) | En una carga masiva, un archivo inválido no bloquea al resto |
+| Resultado por archivo (`id`+`status` **o** `error`) | En una carga masiva, un archivo inválido no bloquea al resto. También un fallo de base de datos en un archivo: los anteriores ya están registrados y encolados, y abortar la mutación invitaría a reenviar el lote y duplicarlos |
+| Metadatos sin caracteres de control ni `U+FFFD` (`@Matches`) | Los caracteres `U+0002`–`U+0004` son los marcadores del resaltado; `U+FFFD` delata texto mal codificado. Se rechazan con un mensaje claro en lugar de guardarlos |
 | Validación del contenido real: firma `%PDF-`; UTF-8 sin bytes nulos para TXT/MD | La extensión y el `mimetype` los decide el cliente |
 | Nombre en disco = UUID; nombre original saneado solo como metadato | Evita *path traversal* y rutas adivinables |
 | `MAX_UPLOAD_BYTES` = 10 MB, inclusivo y configurable | El enunciado no fija un valor; 10 MB es la orientación acordada. busboy corta al **alcanzar** el límite, por eso se le pasa `límite + 1` |
@@ -154,7 +155,7 @@ El enunciado define el actor de HU-01 como "Administrador / Desarrollador" y el 
 | `status TEXT` + `CHECK (PROCESANDO, INDEXADO, ERROR)` | Estados del enunciado impuestos por la base de datos. Un `CHECK` es más fácil de evolucionar que un `ENUM` de Postgres |
 | `CHECK (status <> 'INDEXADO' OR search_vector IS NOT NULL AND indexed_at IS NOT NULL)` | La base de datos impide marcar un documento como INDEXADO sin su índice |
 | `content_indexed BOOLEAN` + `CHECK (NOT content_indexed OR extracted_text IS NOT NULL)`, en una **segunda migración** (`AddContentIndexed`) | Distingue los documentos indexados con contenido de los indexados solo por metadatos. Se añadió con una migración nueva, sin editar la anterior, como se haría con datos en producción. `down()` verificado: revertir y volver a aplicar |
-| `storage_path` relativo a `STORAGE_DIR` | Permite mover el almacenamiento (o pasarlo a almacenamiento de objetos) sin reescribir filas |
+| `storage_path` relativo a `STORAGE_DIR` | Permite mover el almacenamiento (o pasarlo a almacenamiento de objetos) sin reescribir filas. El código accede a los archivos solo a través de `FileStorage` |
 | `search_vector` lo escribe el worker, no una columna generada | `array_to_string` no es `IMMUTABLE` (comprobado: `provolatile = s`). Además, un solo `UPDATE` hace atómica la transición a INDEXADO |
 | SQL escrito a mano; `synchronize: false` | El esquema de búsqueda debe ser explícito y revisable |
 | `migrationsRun: true` | La API migra al arrancar. Para varias réplicas pasaría a un paso del despliegue |
@@ -170,12 +171,14 @@ El enunciado define el actor de HU-01 como "Administrador / Desarrollador" y el 
 | **Errores definitivos** (PDF dañado o protegido, archivo inexistente, `tsvector` de más de 1 MB) → `ERROR` sin reintentar | Reintentar todo | Reintentar un PDF dañado da el mismo resultado; solo retrasa el aviso al usuario |
 | **Sin texto extraíble** (PDF escaneado, archivo en blanco) → `INDEXADO` solo por título y metadatos, con `content_indexed = false` (*decisión del propietario*) | `ERROR`; OCR | El documento sigue siendo útil y localizable por sus metadatos, y la marca permite identificarlo y avisarlo en la interfaz. OCR (p. ej. Tesseract) queda fuera del alcance |
 | **Errores transitorios** (BD o Redis caídos) → 3 intentos con espera exponencial (2 s, 4 s); agotados → `ERROR` | Sin reintentos | Una caída breve no debe marcar documentos válidos como erróneos |
-| **Reconciliación** al arrancar el worker: reencola los `PROCESANDO` | Aceptar documentos atascados | Si Redis falla justo después del INSERT, la API registra el error, responde `PROCESANDO` y el documento se recupera al reiniciar el worker. Límite: no es periódica; con un `JobScheduler` de BullMQ lo sería |
+| **Reconciliación** al arrancar el worker: reencola los `PROCESANDO` | Aceptar documentos atascados | Si Redis falla justo después del INSERT, la API registra el error, responde `PROCESANDO` y el documento se recupera al reiniciar el worker. BullMQ **ignora** `add()` si ya existe un trabajo con ese `jobId` (los fallidos se retienen), así que antes se elimina el trabajo terminado, fallido o en estado desconocido; uno en espera o activo se deja. Un fallo con un documento se registra y no impide recuperar el resto. Probado en e2e con un trabajo fallido retenido. Límite: no es periódica; con un `JobScheduler` de BullMQ lo sería |
+| Marcar `ERROR` al agotar los reintentos, con el fallo capturado y registrado | Dejar que la promesa rechace | Si la base de datos sigue caída, un rechazo no gestionado podría tumbar el worker. El documento queda en `PROCESANDO` y lo recupera la reconciliación |
 | Concurrencia configurable (`INDEXING_CONCURRENCY`, por defecto 2) | Fija | Ajustable según la CPU disponible; se aplica en tiempo de ejecución (el decorador se evaluaría antes de cargar `.env`) |
 | Redis con AOF y `noeviction` | Configuración por defecto | Los trabajos sobreviven a un reinicio de Redis y nunca se descartan por memoria |
 | **`unpdf`** para PDF | `pdf-parse`, `pdfjs-dist` | Sin dependencias (trae pdfjs empaquetado). `pdf-parse` 2.x arrastra un binario nativo (`@napi-rs/canvas`) |
 | Markdown indexado en bruto | Convertirlo a texto plano | El parser de PostgreSQL ya descarta `#`, `*` y `>` al construir el `tsvector`; convertirlo añadiría dependencias sin cambiar el índice |
-| Se eliminan los caracteres NUL del texto extraído | — | PostgreSQL no admite `\0` en `TEXT`, y algunos PDF lo producen |
+| NUL se elimina; el resto de caracteres de control (salvo tabulador y saltos de línea) se sustituye por un espacio | Eliminar solo NUL; sustituirlos todos | PostgreSQL no admite `\0` en `TEXT`, y algunos PDF lo emiten dentro de una palabra (un espacio la partiría). `U+0002`–`U+0004` son los marcadores del resaltado: un `.txt` que los contuviera desordenaría los fragmentos. El salto de página `U+000C` separa palabras, por eso pasa a espacio |
+| `loadingTask.destroy()` del PDF en un `finally` | Confiar en el recolector | unpdf solo libera los documentos que crea él; sin liberarlo, cada PDF retendría memoria de pdf.js en un proceso de larga duración |
 
 ### Diseño del índice full-text
 
@@ -206,10 +209,20 @@ El enunciado define el actor de HU-01 como "Administrador / Desarrollador" y el 
 |---|---|
 | `res.sendFile` | Aporta `Range` (206; PDF.js carga por partes), `ETag` y `Last-Modified` sin código propio. Verificado: `bytes=2-5` → 206 |
 | `Content-Type` desde `mime_type` validado en la carga (texto con `charset=utf-8`) | El tipo lo decide el backend, no la extensión del archivo en disco (que no tiene) |
-| `Content-Disposition: inline` + `filename*` (RFC 6266) | El navegador lo muestra en lugar de descargarlo. Los nombres con tildes se conservan; `?download=1` lo convierte en `attachment` |
+| `Content-Disposition: inline` + `filename*` (RFC 6266) | El navegador lo muestra en lugar de descargarlo. Los nombres con tildes se conservan (`'`, `(`, `)` y `*` se codifican también, como exige RFC 5987); `?download=1` lo convierte en `attachment` |
 | `X-Content-Type-Options: nosniff` | El navegador no "adivina" HTML en un `.txt` subido |
 | Ruta física nunca expuesta; archivo resuelto por `id` → `storage_path` | Sin *path traversal*: el cliente nunca indica una ruta |
 - Índice `(created_at DESC, id DESC)` para listados y como desempate estable de la paginación.
+
+### Errores de la API
+
+| Decisión | Alternativa | Motivo |
+|---|---|---|
+| REST: `{ statusCode, error, message }` en español (`HttpErrorFilter`) | Formato por defecto de Nest | Un solo formato para validación, 404, credenciales y rutas inexistentes. Un 500 devuelve un mensaje genérico y se registra en el servidor |
+| GraphQL: `{ message, extensions: { code, details } }` (`formatError`) | El `"Bad Request Exception"` de Nest con el detalle en `originalError` | El cliente muestra `message` tal cual; `details` trae un error por campo. Nunca sale `originalError` ni la traza (`includeStacktraceInErrorResponses: false`) |
+| Mensajes de class-validator traducidos por regla (`exceptionFactory`): "Documento 2 · título: admite como máximo 200 caracteres" | i18n completo | class-validator no permite cambiar el idioma globalmente. Es un mapa pequeño de reglas y campos, cubierto por pruebas e2e. Una regla sin traducir mantiene su texto original |
+| Errores de cliente de Express (JSON mal formado, cuerpo de más de 100 kB, multipart de graphql-upload) → `requestErrorHandler`, con el formato de su ruta | La página HTML de Express o el texto de body-parser ("Unexpected end of JSON input") | Superar el máximo de archivos devolvía HTML. El JSON se parsea en `configureApp`, porque Nest registra su parser después de los middlewares propios y sus errores no pasarían por el manejador |
+| Si la respuesta ya empezó (SSE, archivo), el filtro cierra la conexión | Dejarla abierta | No cabe otra respuesta; es lo que hace el filtro por defecto de Nest |
 
 ### Latencia: medición y optimización
 
@@ -369,7 +382,7 @@ El coste de ordenar por relevancia crece con el **número de coincidencias**, no
 
 ### Otros límites al crecer
 
-- **Almacenamiento de originales:** `STORAGE_DIR` local. Con varias réplicas o mucho volumen, almacenamiento de objetos (S3 o compatible). `storage_path` es relativo, así que no hay que reescribir filas.
+- **Almacenamiento de originales:** `STORAGE_DIR` local. Con varias réplicas o mucho volumen, almacenamiento de objetos (S3 o compatible). `storage_path` es relativo (no hay que reescribir filas) y `FileStorage` es el único punto que toca el disco: el cambio se concentra en esa clase y en cómo se sirve el original (hoy `sendFile`, con S3 un *stream* o una URL firmada).
 - **Tamaño de la tabla:** particionar `documents` (por fecha o categoría) mantiene los índices y el `VACUUM` manejables.
 - **Paginación profunda:** `OFFSET` está acotado (página ≤ 1 000) y el total se cuenta con tope, así que una consulta amplia nunca recorre todo solo para contar.
 - **Mantenimiento del índice:** las cargas masivas acumulan entradas en la lista pendiente del GIN (*fastupdate*). El autovacuum la vacía; en cargas masivas conviene un `VACUUM ANALYZE` al terminar (observado en la medición: el índice pasó de 8,6 a 4,3 MB y las estadísticas cambiaron los planes).
@@ -381,9 +394,18 @@ El coste de ordenar por relevancia crece con el **número de coincidencias**, no
 | Migraciones en `backend/migrations/` | `backend/src/database/migrations/` | Dentro de `src/` las compila `nest build` y se importan como clases, que funciona igual en ESM, en `dist/` y en Vitest (los globs de archivos no) |
 | `.env.example` en la raíz | `backend/.env.example` | La API carga `.env` desde su propio directorio de trabajo |
 | — | `docker/postgres/init/` | Script de inicialización que crea la base `documents_test` |
-| `packages/shared/` (opcional) | No se crea | Por ahora no hay tipos duplicados entre capas que lo justifiquen. Se reevaluará con el frontend |
+| `packages/shared/` (opcional) | No se crea | Los tipos de la API se repiten en `frontend/src/services/api.ts` (unos 10 tipos pequeños). Se asume la duplicación frente a montar un paquete compartido con su build en ambos proyectos; si el contrato creciera, se generarían desde el esquema GraphQL |
 
-## 6. Limitaciones conocidas
+## 6. Calidad del diseño y deuda conocida
+
+Revisión SOLID hecha tras la auditoría del 2026-10-28:
+
+- **S**: controladores delgados y lógica pura aislada y probada (`file-validation`, `highlight`, `text-extraction`, `status-store`, `page-window`). La carga de cada archivo se separó en recibir → registrar → encolar. `UploadPage.tsx` sigue concentrando bastante estado del formulario.
+- **O**: añadir un formato exige tocar `text-extraction` (decisión por MIME), `file-validation` y el mapa MIME del frontend. Con tres formatos, un registro `{ mime: extractor }` sería una abstracción sin segundo uso.
+- **D**: el almacenamiento está detrás de `FileStorage`. La configuración se lee con la función `appConfig()` en lugar de `ConfigService`: es más simple y la comparten el worker y los scripts, a cambio de no poder inyectar otra en las pruebas (se usan variables de entorno).
+- Las consultas de búsqueda usan SQL concreto de PostgreSQL a propósito: el FTS es el requisito, no un detalle intercambiable.
+
+## 7. Limitaciones conocidas
 
 - Límite de intentos de login en memoria por instancia (ver modelo de permisos).
 - No hay revocación de tokens antes de su caducidad.

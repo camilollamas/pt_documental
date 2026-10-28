@@ -1,13 +1,14 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { Redis } from 'ioredis';
 import { appConfig } from '../common/config.js';
+import { redisOptions } from '../common/redis.js';
 import { DocumentStatusEvent } from './document-status-event.js';
 
 /** Lado worker: publica cada cambio de estado en Redis Pub/Sub. */
 @Injectable()
 export class StatusPublisher implements OnModuleDestroy {
   private readonly logger = new Logger(StatusPublisher.name);
-  private readonly redis = new Redis(appConfig().redisUrl, { lazyConnect: true });
+  private readonly redis = new Redis({ ...redisOptions(appConfig().redisUrl), lazyConnect: true });
 
   /**
    * Nunca lanza: PostgreSQL ya tiene el estado correcto. Un evento perdido se recupera

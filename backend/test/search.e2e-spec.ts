@@ -273,10 +273,12 @@ describe('Búsqueda, detalle y original', () => {
       expect(Buffer.compare(res.body, pdf)).toBe(0);
     });
 
-    it('permite descargarlo explícitamente con ?download=1', async () => {
-      const id = await seed({ title: 'T', content: 'hola', filename: 'nota.txt' });
+    it('permite descargarlo explícitamente con ?download=1 (escapa comilla y paréntesis en filename*)', async () => {
+      const id = await seed({ title: 'T', content: 'hola', filename: "O'Brien (v2).txt" });
       const res = await http().get(`/api/documents/${id}/original?download=1`).expect(200);
-      expect(res.headers['content-disposition']).toMatch(/^attachment;/);
+      expect(res.headers['content-disposition']).toBe(
+        `attachment; filename="O'Brien (v2).txt"; filename*=UTF-8''O%27Brien%20%28v2%29.txt`,
+      );
     });
 
     it('sirve TXT y MD como texto UTF-8', async () => {

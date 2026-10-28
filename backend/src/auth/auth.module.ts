@@ -24,7 +24,10 @@ import { GqlAuthGuard } from './gql-auth.guard.js';
     }),
     // ponytail: contador en memoria por instancia; con varias réplicas usar almacenamiento en Redis.
     ThrottlerModule.forRootAsync({
-      useFactory: () => [{ ttl: 60_000, limit: authConfig().loginMaxAttemptsPerMinute }],
+      useFactory: () => ({
+        throttlers: [{ ttl: 60_000, limit: authConfig().loginMaxAttemptsPerMinute }],
+        errorMessage: 'Demasiados intentos de inicio de sesión. Espere un minuto y vuelva a intentarlo.',
+      }),
     }),
   ],
   controllers: [AuthController],

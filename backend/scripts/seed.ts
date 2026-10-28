@@ -2,12 +2,14 @@
 //   npm run seed                 → 10 000 documentos (o SEED_COUNT)
 //   npm run seed -- --clean      → borra los sembrados (etiqueta "semilla")
 // Los indexa el pipeline real: filas PROCESANDO + archivo en STORAGE_DIR + trabajo en la cola.
-// Requiere el worker en marcha (npm run start:worker). Reproducible: misma semilla, mismos textos.
+// Requiere el worker en marcha (npm run start:worker) y el build (npm run build: reutiliza la conexión
+// a Redis de la aplicación). Reproducible: misma semilla, mismos textos.
 import { Queue } from 'bullmq';
 import { randomUUID } from 'node:crypto';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import pg from 'pg';
+import { redisOptions } from '../dist/common/redis.js';
 
 try {
   process.loadEnvFile();
@@ -16,7 +18,7 @@ try {
 }
 
 const DATABASE_URL = process.env.DATABASE_URL ?? 'postgres://docs:docs_local@localhost:5432/documents';
-const REDIS_URL = new URL(process.env.REDIS_URL ?? 'redis://localhost:6379');
+const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const STORAGE_DIR = resolve(process.env.STORAGE_DIR ?? './storage');
 const COUNT = Number(process.env.SEED_COUNT ?? 10_000);
 const TAG = 'semilla';
@@ -111,9 +113,7 @@ if (process.argv.includes('--clean')) {
   process.exit(0);
 }
 
-const queue = new Queue('indexing', {
-  connection: { host: REDIS_URL.hostname, port: Number(REDIS_URL.port || 6379), db: Number(REDIS_URL.pathname.slice(1) || 0) },
-});
+const queue = new Queue('indexing', { connection: redisOptions(REDIS_URL) });
 await mkdir(STORAGE_DIR, { recursive: true });
 console.log(`Sembrando ${COUNT} documentos en ${DATABASE_URL.replace(/:[^:@/]+@/, ':***@')} …`);
 

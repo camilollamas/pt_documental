@@ -84,6 +84,16 @@ describe('Buscar', () => {
     expect(within(nav).getByRole('link', { name: '100' })).toBeInTheDocument();
   });
 
+  it('normaliza una página inválida de la URL y avisa si está más allá de la última', async () => {
+    const fetchMock = mockFetch(searchRoute({ items: [], total: 25, page: 1000, pageSize: 10 }));
+    renderApp('/buscar?q=guardia&page=99999.7');
+
+    expect(await screen.findByText(/La página 1000 no tiene resultados/)).toBeInTheDocument();
+    expect(fetchMock.mock.calls[0][0]).toContain('page=1000');
+    expect(screen.getByRole('link', { name: 'Ir a la primera página' })).toHaveAttribute('href', '/buscar?q=guardia&page=1');
+    expect(screen.queryByRole('navigation', { name: 'Paginación de resultados' })).toBeNull();
+  });
+
   it('muestra un error legible si la búsqueda falla', async () => {
     mockFetch(searchRoute({ statusCode: 500 }, 500));
     renderApp('/buscar?q=algo');

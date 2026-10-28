@@ -37,6 +37,17 @@ describe('Sesión del administrador', () => {
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ username: 'admin', password: 'clave-correcta' });
   });
 
+  it('muestra un usuario con tildes tal cual (el JWT va en UTF-8)', async () => {
+    mockFetch((url) => (url === '/api/auth/login' ? json({ accessToken: fakeToken('josé'), expiresIn: '8h' }) : undefined));
+    renderApp('/login');
+
+    await userEvent.type(screen.getByLabelText('Usuario'), 'josé');
+    await userEvent.type(screen.getByLabelText('Contraseña'), 'clave');
+    await userEvent.click(screen.getByRole('button', { name: 'Iniciar sesión' }));
+
+    expect(await within(header()).findByText('josé')).toBeInTheDocument();
+  });
+
   it('con credenciales incorrectas muestra el error de la API', async () => {
     mockFetch((url) => (url === '/api/auth/login' ? json({ statusCode: 401, message: 'Credenciales inválidas' }, 401) : undefined));
     renderApp('/login');

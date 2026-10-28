@@ -9,10 +9,12 @@ describe('extractDocumentText', () => {
     );
   });
 
-  it('devuelve TXT y Markdown como texto, sin caracteres NUL', async () => {
-    const md = Buffer.from('# Título\u0000\n\nTexto **técnico**');
+  it('devuelve TXT y Markdown como texto, sin NUL y con el resto de caracteres de control como espacios', async () => {
+    // NUL (no cabe en TEXT de PostgreSQL) se elimina sin partir la palabra; U+0002–U+0004 (marcadores
+    // del resaltado) se vuelven espacios; tabuladores y saltos de línea se conservan.
+    const md = Buffer.from('# Tít\u0000ulo\n\nTexto\u0002**técnico**\u0004fin\tcolumna');
     await expect(extractDocumentText(md, 'text/markdown')).resolves.toBe(
-      '# Título\n\nTexto **técnico**',
+      '# Título\n\nTexto **técnico** fin\tcolumna',
     );
   });
 

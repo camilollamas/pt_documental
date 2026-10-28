@@ -5,6 +5,9 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DataSource } from 'typeorm';
+import { getQueueToken } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import { INDEXING_QUEUE } from '../src/indexing/indexing-queue.module.js';
 import { IndexingService } from '../src/indexing/indexing.service.js';
 import { WorkerModule } from '../src/indexing/worker.module.js';
 import { createTestApp, loginAsAdmin, metadata, TestFile, uploadRequest } from './helpers.js';
@@ -165,6 +168,29 @@ describe('Indexación en segundo plano (cola + worker)', () => {
     );
     expect(after).toEqual(before);
   });
+
+  it('la reconciliación recupera un documento aunque su trabajo anterior siga retenido en la cola', async () => {
+    // Un trabajo con el mismo id terminado y RETENIDO (removeOnComplete/removeOnFail) hace que
+    // BullMQ ignore un add() nuevo con ese jobId. Se simula: el trabajo corre antes de que exista la fila.
+    const id = randomUUID();
+    const queue = worker.get<Queue>(getQueueToken(INDEXING_QUEUE));
+    const stale = await queue.add('index', { documentId: id }, { jobId: id });
+    const deadline = Date.now() + 10_000;
+    while ((await stale.getState()) !== 'completed' && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+    expect(await stale.getState()).toBe('completed');
+
+    await writeFile(join(storageDir, id), 'documento con un trabajo viejo retenido sobre vault');
+    await db.query(
+      `INSERT INTO documents (id, title, author, category, version, original_filename, mime_type,
+                              storage_path, size_bytes)
+       VALUES ($1, 'Retenido', 'QA', 'Manual', '1', 'r.txt', 'text/plain', $2, 50)`,
+      [id, id],
+    );
+
+    expect(await worker.get(IndexingService).requeuePending()).toBe(1);
+    expect((await waitForFinalStatus(id)).status).toBe('INDEXADO');
+    expect(await matches(id, 'vault:C')).toBe(true);
+  }, 30_000);
 
   it('reencola documentos que quedaron en PROCESANDO sin trabajo (reconciliación)', async () => {
     // Simula una carga cuyo encolado falló: fila y archivo existen, pero no hay trabajo en Redis.

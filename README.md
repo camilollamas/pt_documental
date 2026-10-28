@@ -174,7 +174,7 @@ Cada archivo del lote se acepta o se rechaza por separado. Un archivo rechazado 
 | Sin token, o token inválido o caducado | HTTP 401 `UNAUTHENTICATED`, antes de recibir los archivos |
 | Sin la cabecera `apollo-require-preflight` | HTTP 400 (CSRF) |
 | Más archivos que `MAX_FILES_PER_UPLOAD` | HTTP 413 |
-| Metadatos inválidos o número de archivos ≠ número de metadatos | `errors[0].extensions.code = "BAD_REQUEST"` |
+| Metadatos inválidos o número de archivos ≠ número de metadatos | `errors[0].message` en español (p. ej. "Documento 1 · título: admite como máximo 200 caracteres") y `extensions: { code: "BAD_REQUEST", details: [...] }` con un error por campo |
 
 ### Buscar
 
@@ -280,7 +280,7 @@ npm run build       # comprobación de tipos + build de producción
 
 ## Datos de prueba y medición de la búsqueda
 
-Con la API y el worker en marcha:
+Con la API y el worker en marcha, y el backend compilado (`npm run build`: la siembra reutiliza la conexión a Redis de `dist/`):
 
 ```bash
 cd backend

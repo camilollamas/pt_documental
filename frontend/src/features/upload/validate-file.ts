@@ -29,5 +29,8 @@ const MIME_BY_EXTENSION: Record<string, string> = {
 export const mimeFromFilename = (name: string) =>
   MIME_BY_EXTENSION[name.slice(name.lastIndexOf('.')).toLowerCase()] ?? '';
 
-/** "manual-de-despliegue.pdf" → "manual-de-despliegue": punto de partida editable del título. */
-export const titleFromFilename = (name: string) => name.replace(/\.[^.]+$/, '');
+/**
+ * "manual-de-despliegue.pdf" → "manual-de-despliegue": punto de partida editable del título.
+ * Se recorta al máximo de la API (200): `maxLength` del input no corta un valor asignado por código.
+ */
+export const titleFromFilename = (name: string) => name.replace(/\.[^.]+$/, '').slice(0, 200);

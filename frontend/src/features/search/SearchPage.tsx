@@ -14,11 +14,14 @@ import { Pagination } from './Pagination';
 type Outcome = { key: string } & ({ kind: 'error'; message: string } | { kind: 'done'; result: SearchResponse });
 type State = { kind: 'idle' } | { kind: 'loading' } | Outcome;
 
+/** Mismo tope que la API (search-query.dto.ts): una URL editada a mano no debe acabar en un 400. */
+const MAX_PAGE = 1000;
+
 /** La consulta vive en la URL (?q=&page=): se puede compartir, recargar y volver atrás. */
 export function SearchPage() {
   const [params, setParams] = useSearchParams();
   const query = params.get('q')?.trim() ?? '';
-  const page = Math.max(1, Number(params.get('page')) || 1);
+  const page = Math.min(MAX_PAGE, Math.max(1, Math.trunc(Number(params.get('page'))) || 1));
   const key = query ? `${query}\n${page}` : '';
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const resultsHeading = useRef<HTMLHeadingElement>(null);
@@ -104,6 +107,14 @@ export function SearchPage() {
           <h2 ref={resultsHeading} tabIndex={-1} className="sr-only">
             Resultados
           </h2>
+          {state.result.items.length === 0 && (
+            <p className="py-6">
+              La página {state.result.page} no tiene resultados.{' '}
+              <Link to={hrefFor(1)} className="text-accent">
+                Ir a la primera página
+              </Link>
+            </p>
+          )}
           <ol className="grid">
             {state.result.items.map((item) => (
               <li key={item.id} className="grid max-w-(--reading-max) gap-1 border-b border-rule py-4">
@@ -140,7 +151,9 @@ export function SearchPage() {
               </li>
             ))}
           </ol>
-          <Pagination page={state.result.page} pageSize={state.result.pageSize} total={state.result.total} totalCapped={state.result.totalCapped} hrefFor={hrefFor} />
+          {state.result.items.length > 0 && (
+            <Pagination page={state.result.page} pageSize={state.result.pageSize} total={state.result.total} totalCapped={state.result.totalCapped} hrefFor={hrefFor} />
+          )}
         </div>
       )}
     </section>

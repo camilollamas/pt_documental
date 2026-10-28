@@ -50,11 +50,11 @@ export class ApiError extends Error {
   }
 }
 
-/** Mensaje legible desde un error de Nest ({ message }) o uno genérico según el código. */
+/** Mensaje legible desde un error de la API ({ message }, texto o lista) o uno genérico según el código. */
 async function ensureOk(res: Response): Promise<Response> {
   if (res.ok) return res;
   const body = await res.json().catch(() => null);
-  const message = Array.isArray(body?.message) ? body.message[0] : body?.message;
+  const message = Array.isArray(body?.message) ? body.message.join(' · ') : body?.message;
   throw new ApiError(message ?? fallbackMessage(res.status), res.status);
 }
 

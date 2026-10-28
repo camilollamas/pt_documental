@@ -42,6 +42,7 @@ Solo con el visto bueno del desarrollador se pasa al siguiente bloque.
 | Bloque 5a: frontend (búsqueda, visor, login) | Autoriza el bloque tras confirmar las decisiones del sistema de diseño | Genera el proyecto con el scaffold oficial de Vite, los tokens de Cajetín en Tailwind, los componentes, las pantallas y 28 pruebas. Verifica el stack completo a través del proxy de Vite (login, carga, búsqueda, original y SSE). Corrige varios fallos propios detectados por el linter y las pruebas (ver abajo) |
 | Bloque 5b: carga y estado en vivo | Autoriza el bloque | Genera la pantalla de carga (arrastrar y soltar, validación con los límites de la API, metadatos por lote y por archivo), el hook de estado en vivo por SSE, la actualización en vivo del detalle y 11 pruebas nuevas. Ejecuta las funciones reales del cliente contra la API real con Node (multipart, SSE, búsqueda, 401) |
 | Etapa 3: medición de la latencia | Autoriza la etapa | Genera los scripts de siembra (pipeline real) y de benchmark (HTTP p50/p95, `Server-Timing`, concurrencia, `EXPLAIN` de la consulta exacta). La primera medición queda **fuera del objetivo** y se informa así. Diagnostica con el plan y tiempos aislados en psql, prueba y **descarta** dos hipótesis propias (vector reducido, compresión `lz4`), aplica `ts_rank` y el conteo con tope, y vuelve a medir en las mismas condiciones: p95 de 1 243 → 462 ms y, con 10 clientes, de 2 078 → 778 ms. Corrige una afirmación técnica errónea que había escrito antes sobre cómo escala el GIN |
+| Auditoría de calidad y correcciones | Pide una auditoría como experto: cumplimiento del PDF, discrepancias, principios SOLID, estructura y funcionalidad. Tras leer el informe, ordena **aplicar el plan completo** y auditar al final | Revisa el código contra el PDF y el documento técnico y reporta 10 defectos verificados por severidad, 3 discrepancias y una valoración SOLID (la inversión de dependencias era el punto débil). Antes de corregir, reproduce los que puede: los errores GraphQL salían como "Bad Request Exception" con el detalle en inglés, y una prueba e2e nueva demuestra que la reconciliación no recuperaba un documento con un trabajo fallido retenido en BullMQ. Corrige todos con una prueba por defecto: reconciliación, liberación de memoria de los PDF, errores por archivo en la carga, formato de errores uniforme en español, `FileStorage`, conexión a Redis con usuario y TLS, caracteres de control, paginación fuera de rango, `filename*` y nombres de usuario UTF-8 |
 
 ## 3. Prompts clave y cómo se refinaron
 
@@ -77,6 +78,11 @@ Los prompts se muestran resumidos y con la redacción limpiada; el sentido es el
 
    *Resultado:* hallazgos priorizados que motivaron adelantar `README.md`, `architecture.md` y este documento.
 
+7. **Auditoría de calidad.**
+   > "Actúa como experto en auditar y analiza si el proyecto cumple lo que pide el PDF: discrepancias, principios SOLID, estructura y funcionalidad."
+
+   *Refinamiento:* "Aplica el plan completo, analizando lo que haces, revisando y auditando al final." Cada corrección se acompañó de una prueba que fallaba antes, y la documentación se corrigió donde afirmaba algo que el código no cumplía (la reconciliación y el paso a S3).
+
 ## 4. Validación humana y control de calidad
 
 ### Mecanismos de control aplicados
@@ -108,6 +114,12 @@ Los prompts se muestran resumidos y con la redacción limpiada; el sentido es el
 - La validación del README en una copia limpia detectó que el ejemplo `curl` de carga guardaba los títulos con tildes dañados en Windows (`curl` convierte los argumentos a la página de códigos del sistema). Se confirmó la causa, se cambió el ejemplo para leer la operación de un archivo y la API ahora rechaza los metadatos con el carácter de reemplazo `�`.
 - Al añadir esa validación, una edición con `sed` dejó la expresión regular como `/^[^FFFD]*$/`, que habría rechazado cualquier texto con una F o una D. Se detectó al revisar el archivo y se corrigió antes de ejecutar las pruebas; una prueba nueva acepta "Guía FAQ" y la etiqueta "DFS".
 - Un proceso `nest start --watch` lanzado por la IA en una verificación del Bloque 2 siguió vivo varias horas: al detener la tarea solo se cerró el proceso hijo. Se detectó al revisar los procesos al final del Bloque 5b. La herramienta no permitió cerrarlo desde la sesión y se pidió al desarrollador que lo cerrara.
+- Auditoría: la documentación afirmaba que la reconciliación "reencola los `PROCESANDO`", pero BullMQ ignora `add()` cuando el trabajo fallido sigue retenido con el mismo `jobId`. Lo detectó la auditoría y lo confirmó una prueba e2e antes de corregirlo.
+- Auditoría: el plan de corrección proponía `pdf.destroy()`, un método que no existe en el documento de pdf.js que devuelve unpdf. Lo detectó `tsc`; la llamada correcta es `loadingTask.destroy()`, y una prueba unitaria comprueba que se llama también cuando el PDF está dañado.
+- Auditoría: la expresión que reconoce el error de "demasiados archivos" de graphql-upload se escribió suponiendo el texto del mensaje, y no coincidía. La prueba e2e lo detectó; se comprobó el mensaje real de la librería.
+- Auditoría: la herramienta de edición convirtió las secuencias `\uFFFD`/`\u0000` de una expresión regular en caracteres literales (invisibles). Se detectó con `od -c` y se reescribieron con un script; desde entonces cada edición de una regex se comprueba así.
+- Auditoría: el nombre de una prueba con una comilla escapada rompió el archivo de pruebas. Lo detectó `tsc`.
+- Re-auditoría de las propias correcciones: una segunda revisión de código encontró tres fallos introducidos o no cubiertos por ellas. Sustituir NUL por espacio partía palabras, la lectura del archivo recién guardado quedaba fuera del control de errores por archivo y el manejador de multipart daba un mensaje de tamaño equivocado. Se corrigieron con pruebas. Dos hallazgos del revisor se descartaron tras comprobarlos: Nest 12 ya traduce los errores de body-parser a su código HTTP, y una medición con 820 PDFs dañados descartó la fuga de memoria que se suponía.
 
 ### Verificaciones ejecutadas por el desarrollador
 *(Registrar aquí las verificaciones que el desarrollador ejecute personalmente: comando, fecha y resultado.)*

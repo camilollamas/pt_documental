@@ -20,7 +20,8 @@ function readSession(): Session | null {
 /** Solo se leen `exp` y `sub` para la interfaz; la validez real la decide la API en cada petición. */
 function decodeToken(token: string): { sub: string; exp: number } {
   const payload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-  return JSON.parse(atob(payload));
+  // atob devuelve bytes sueltos; el JSON del JWT va en UTF-8 (un usuario "josé" se rompería sin decodificarlo).
+  return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(payload), (c) => c.charCodeAt(0))));
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {

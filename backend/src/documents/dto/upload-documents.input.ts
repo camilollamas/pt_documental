@@ -11,15 +11,16 @@ import {
 } from 'class-validator';
 
 /**
- * U+FFFD (�) es el carácter de reemplazo: aparece cuando el texto llegó en otra codificación (p. ej.
- * curl en Windows con argumentos en la página de códigos del sistema). Se rechaza para no guardar texto dañado.
+ * Texto de metadatos válido: sin U+FFFD (carácter de reemplazo: el texto llegó en otra codificación,
+ * p. ej. curl en Windows con argumentos en la página de códigos del sistema) ni caracteres de control
+ * (U+0000–U+001F: entre ellos los marcadores del resaltado de ts_headline). Se rechaza para no guardar
+ * texto dañado.
  */
-const NO_REPLACEMENT_CHAR = /^[^\uFFFD]*$/;
-const utf8 = (each = false) =>
-  Matches(NO_REPLACEMENT_CHAR, {
-    each,
-    message: '$property contiene caracteres dañados (�): envíe el texto codificado en UTF-8',
-  });
+// oxlint-disable-next-line no-control-regex -- detectarlos es justo el objetivo
+const CLEAN_TEXT = /^[^\uFFFD\u0000-\u001F]*$/;
+const cleanText = (each = false) =>
+  // El mensaje en español lo pone validation-errors.ts (regla "matches").
+  Matches(CLEAN_TEXT, { each });
 
 const trim = () =>
   Transform(({ value }) => (typeof value === 'string' ? value.trim() : value));
@@ -30,7 +31,7 @@ export class DocumentMetadataInput {
   @trim()
   @IsString()
   @IsNotEmpty()
-  @utf8()
+  @cleanText()
   @MaxLength(200)
   title: string;
 
@@ -38,7 +39,7 @@ export class DocumentMetadataInput {
   @trim()
   @IsString()
   @IsNotEmpty()
-  @utf8()
+  @cleanText()
   @MaxLength(120)
   author: string;
 
@@ -46,7 +47,7 @@ export class DocumentMetadataInput {
   @trim()
   @IsString()
   @IsNotEmpty()
-  @utf8()
+  @cleanText()
   @MaxLength(80)
   category: string;
 
@@ -59,14 +60,14 @@ export class DocumentMetadataInput {
   @ArrayMaxSize(20)
   @IsString({ each: true })
   @MaxLength(40, { each: true })
-  @utf8(true)
+  @cleanText(true)
   tags: string[];
 
   @Field()
   @trim()
   @IsString()
   @IsNotEmpty()
-  @utf8()
+  @cleanText()
   @MaxLength(20)
   version: string;
 }

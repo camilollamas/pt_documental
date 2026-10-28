@@ -11,7 +11,6 @@ import { WorkerModule } from '../src/indexing/worker.module.js';
 import { createTestApp, loginAsAdmin, metadata, uploadRequest } from './helpers.js';
 
 type SseEvent = { type: string; data: Record<string, unknown> };
-type StatusData = { id: string; status: string; contentIndexed: boolean; errorMessage: string | null; updatedAt: string };
 
 /** Cliente SSE mínimo sobre fetch: lee el protocolo real (event:/data:, comentarios ":"). */
 function openSse(url: string) {

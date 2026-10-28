@@ -2,10 +2,8 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { Queue } from 'bullmq';
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { DataSource } from 'typeorm';
-import { appConfig } from '../common/config.js';
+import { FileStorage } from '../common/file-storage.js';
 import { DocumentStatusEvent } from '../events/document-status-event.js';
 import { StatusPublisher } from '../events/status-publisher.service.js';
 import { INDEXING_QUEUE, IndexingJob } from './indexing-queue.module.js';
@@ -57,6 +55,7 @@ export class IndexingService {
     @InjectDataSource() private readonly db: DataSource,
     @InjectQueue(INDEXING_QUEUE) private readonly queue: Queue<IndexingJob>,
     private readonly publisher: StatusPublisher,
+    private readonly storage: FileStorage,
   ) {}
 
   /**
@@ -73,7 +72,7 @@ export class IndexingService {
 
     let text: string;
     try {
-      const content = await readFile(join(appConfig().storageDir, doc.storage_path)).catch(() => {
+      const content = await this.storage.read(doc.storage_path).catch(() => {
         throw new ExtractionError('El archivo original no está disponible');
       });
       text = await extractDocumentText(content, doc.mime_type);
@@ -122,9 +121,32 @@ export class IndexingService {
     const pending = await this.db.query<{ id: string }[]>(
       `SELECT id FROM documents WHERE status = 'PROCESANDO'`,
     );
-    await Promise.all(
-      pending.map(({ id }) => this.queue.add('index', { documentId: id }, { jobId: id })),
+    const requeued = await Promise.all(
+      pending.map(({ id }) =>
+        // Un fallo con un documento (p. ej. otra réplica lo reencoló a la vez) no impide recuperar el resto.
+        this.requeue(id).catch((error: Error) => {
+          this.logger.warn(`No se pudo reencolar ${id}: ${error.message}`);
+          return false;
+        }),
+      ),
     );
-    return pending.length;
+    return requeued.filter(Boolean).length;
+  }
+
+  /**
+   * BullMQ ignora add() si ya existe un trabajo con ese jobId en CUALQUIER estado, incluidos los
+   * terminados o fallidos que se retienen (removeOnComplete/removeOnFail). Por eso:
+   * - en cola o en curso → no se toca (ya se procesará);
+   * - terminado, fallido o en un estado desconocido → se elimina y se encola de nuevo.
+   */
+  private async requeue(id: string): Promise<boolean> {
+    const existing = await this.queue.getJob(id);
+    if (existing) {
+      const state = await existing.getState();
+      if (!['completed', 'failed', 'unknown'].includes(state)) return false;
+      await existing.remove();
+    }
+    await this.queue.add('index', { documentId: id }, { jobId: id });
+    return true;
   }
 }

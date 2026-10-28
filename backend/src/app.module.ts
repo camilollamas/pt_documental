@@ -4,6 +4,7 @@ import { GraphQLModule } from '@nestjs/graphql';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import type { Request } from 'express';
 import { AuthModule } from './auth/auth.module.js';
+import { formatGraphqlError } from './common/error-handling.js';
 import { HealthController } from './common/health.controller.js';
 import { typeOrmOptions } from './database/typeorm.config.js';
 import { DocumentsModule } from './documents/documents.module.js';
@@ -23,6 +24,9 @@ import { UploadResolver } from './graphql/upload.resolver.js';
       csrfPrevention: true,
       // El guard de autenticación lee la cabecera Authorization desde aquí.
       context: ({ req }: { req: Request }) => ({ req }),
+      // Mensajes legibles y sin detalles internos; nunca trazas de pila (Apollo las añade fuera de producción).
+      formatError: formatGraphqlError,
+      includeStacktraceInErrorResponses: false,
     }),
     AuthModule,
     DocumentsModule,

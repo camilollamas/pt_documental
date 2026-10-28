@@ -17,7 +17,7 @@ export function renderApp(url: string) {
 
 /** JWT con la forma real (cabecera.payload.firma); la interfaz solo lee sub y exp. */
 export function fakeToken(sub = 'admin', expiresInSeconds = 3600): string {
-  const b64 = (o: object) => btoa(JSON.stringify(o)).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+  const b64 = (o: object) => btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(o)))).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
   return `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub, exp: Math.floor(Date.now() / 1000) + expiresInSeconds })}.firma`;
 }
 
