@@ -17,6 +17,8 @@ export async function createTestApp(env: Record<string, string> = {}): Promise<I
       process.env.TEST_DATABASE_URL ?? 'postgres://docs:docs_local@localhost:5432/documents_test',
     // Base Redis 1: la cola de pruebas no se mezcla con la de la demo (base 0).
     REDIS_URL: process.env.TEST_REDIS_URL ?? 'redis://localhost:6379/1',
+    // Pub/Sub no separa por base Redis: canal propio para no cruzarse con la demo.
+    EVENTS_CHANNEL: 'document-status:test',
     ADMIN_USERNAME: ADMIN.username,
     ADMIN_PASSWORD_HASH: await bcrypt.hash(ADMIN.password, 4), // coste bajo: solo pruebas
     JWT_SECRET: 'secreto-de-pruebas-con-mas-de-32-caracteres',

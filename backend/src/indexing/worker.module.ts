@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { typeOrmOptions } from '../database/typeorm.config.js';
+import { StatusPublisher } from '../events/status-publisher.service.js';
 import { IndexingQueueModule } from './indexing-queue.module.js';
 import { IndexingProcessor } from './indexing.processor.js';
 import { IndexingService } from './indexing.service.js';
@@ -12,6 +13,6 @@ import { IndexingService } from './indexing.service.js';
     TypeOrmModule.forRootAsync({ useFactory: () => ({ ...typeOrmOptions(), migrationsRun: false }) }),
     IndexingQueueModule,
   ],
-  providers: [IndexingService, IndexingProcessor],
+  providers: [IndexingService, IndexingProcessor, StatusPublisher],
 })
 export class WorkerModule {}

@@ -72,6 +72,7 @@ En producción: `npm run build`, y después `npm run start:prod` y `npm run star
 | `GET /api/documents/:id` | Público | Metadatos y estado del documento |
 | `GET /api/documents/:id/status` | Público | Estado actual (`PROCESANDO` / `INDEXADO` / `ERROR`) |
 | `GET /api/documents/:id/original` | Público | Archivo original para verlo en el navegador (`?download=1` para descargarlo) |
+| `GET /api/events?ids=` | Público | Flujo SSE de cambios de estado (`INDEXADO` / `ERROR`), sin polling |
 
 ### Variables de entorno (`backend/.env`)
 
@@ -83,6 +84,7 @@ En producción: `npm run build`, y después `npm run start:prod` y `npm run star
 | `REDIS_URL` | `redis://localhost:6379` | Redis de la cola de indexación |
 | `TEST_REDIS_URL` | `redis://localhost:6379/1` | Base Redis de las pruebas e2e |
 | `INDEXING_CONCURRENCY` | `2` | Documentos indexados en paralelo por worker |
+| `EVENTS_CHANNEL` | `document-status` | Canal Redis Pub/Sub de los cambios de estado. La API y el worker deben usar el mismo |
 | `STORAGE_DIR` | `./storage` | Carpeta de los archivos originales (ignorada por Git). La API y el worker deben apuntar a la misma |
 | `MAX_UPLOAD_BYTES` | `10485760` (10 MB) | Tamaño máximo por archivo, inclusivo |
 | `MAX_FILES_PER_UPLOAD` | `10` | Máximo de archivos por lote |
@@ -191,6 +193,34 @@ curl -I http://localhost:3000/api/documents/<id>/original
 
 El original se sirve `inline` para mostrarlo embebido (PDF en el visor del navegador; MD y TXT como texto UTF-8). Admite peticiones parciales (`Range`) y `?download=1` para descargarlo. La API nunca expone la ruta física del archivo.
 
+### Notificaciones en tiempo real (SSE)
+
+```bash
+curl -N "http://localhost:3000/api/events?ids=<id1>,<id2>"
+```
+
+```text
+event: ready
+retry: 3000
+data: {"following":["e1a01fcb-…"]}
+
+event: status
+data: {"id":"e1a01fcb-…","status":"PROCESANDO","contentIndexed":false,"errorMessage":null,"updatedAt":"…"}
+
+event: status
+data: {"id":"e1a01fcb-…","status":"INDEXADO","contentIndexed":true,"errorMessage":null,"updatedAt":"…"}
+```
+
+- Al conectar se envía el **estado actual** de los `ids` seguidos (hasta 50). Después llegan los cambios en vivo, publicados por el worker.
+- Sin `ids` se reciben los cambios de todos los documentos.
+- `EventSource` se reconecta solo (`retry: 3000`) y en cada reconexión vuelve a recibir el estado actual, así que no se pierde ningún cambio ocurrido durante el corte.
+- Si el estado actual y un evento en vivo llegan cruzados, hay que quedarse con el de `updatedAt` más reciente.
+
+```js
+const events = new EventSource(`/api/events?ids=${ids.join(',')}`);
+events.addEventListener('status', (e) => actualizarEstado(JSON.parse(e.data)));
+```
+
 ### Consultar los límites de carga
 
 ```bash
@@ -205,7 +235,7 @@ Requieren `docker compose up -d`, porque las e2e usan PostgreSQL real.
 ```bash
 cd backend
 npm test            # unitarias
-npm run test:e2e    # integración: login, carga, cola y worker, búsqueda, detalle y original
+npm run test:e2e    # integración: login, carga, cola y worker, búsqueda, detalle, original y SSE
 npm run lint
 ```
 
@@ -219,6 +249,7 @@ npm run lint
 │   │   ├── common/        # configuración y health check
 │   │   ├── database/      # configuración TypeORM y migraciones SQL
 │   │   ├── documents/     # entidad, carga, detalle, original, validación de archivos, DTOs
+│   │   ├── events/        # Redis Pub/Sub (worker → API) y flujo SSE
 │   │   ├── graphql/       # resolvers GraphQL
 │   │   ├── indexing/      # cola BullMQ, worker, extracción de texto e indexación
 │   │   ├── search/        # consulta full-text, ranking y resaltado
@@ -243,7 +274,8 @@ npm run lint
 | HU-02 | Búsqueda full-text paginada con resaltado (API) | ✅ Implementada |
 | HU-03 | Detalle y archivo original para el visor (API) | ✅ Implementada |
 | HU-03 | Visor en la interfaz | ⏳ Pendiente |
-| HU-04 | Notificaciones en tiempo real (SSE) | ⏳ Pendiente |
+| HU-04 | Notificaciones en tiempo real (SSE + Redis Pub/Sub, sin polling) (API) | ✅ Implementada |
+| HU-04 | Actualización reactiva en la interfaz | ⏳ Pendiente |
 | — | Frontend | ⏳ Pendiente |
 | — | Medición de latencia de búsqueda | ⏳ Pendiente |
 

@@ -7,6 +7,8 @@ export function appConfig() {
     databaseUrl:
       process.env.DATABASE_URL ?? 'postgres://docs:docs_local@localhost:5432/documents',
     redisUrl: process.env.REDIS_URL ?? 'redis://localhost:6379',
+    // Pub/Sub de Redis ignora el número de base: el canal separa entornos que comparten Redis.
+    eventsChannel: process.env.EVENTS_CHANNEL ?? 'document-status',
     indexingConcurrency: Number(process.env.INDEXING_CONCURRENCY ?? 2),
     storageDir: resolve(process.env.STORAGE_DIR ?? './storage'),
     maxUploadBytes: Number(process.env.MAX_UPLOAD_BYTES ?? 10 * 1024 * 1024),

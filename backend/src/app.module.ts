@@ -7,6 +7,7 @@ import { AuthModule } from './auth/auth.module.js';
 import { HealthController } from './common/health.controller.js';
 import { typeOrmOptions } from './database/typeorm.config.js';
 import { DocumentsModule } from './documents/documents.module.js';
+import { EventsModule } from './events/events.module.js';
 import { UploadResolver } from './graphql/upload.resolver.js';
 
 @Module({
@@ -25,6 +26,7 @@ import { UploadResolver } from './graphql/upload.resolver.js';
     }),
     AuthModule,
     DocumentsModule,
+    EventsModule,
   ],
   controllers: [HealthController],
   providers: [UploadResolver],

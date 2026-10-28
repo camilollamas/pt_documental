@@ -13,13 +13,13 @@ flowchart LR
     subgraph API["Backend · NestJS"]
         GQL["GraphQL /graphql<br/>uploadDocuments ✅"]
         REST["REST /api<br/>health ✅ · auth/login ✅<br/>búsqueda ✅ · detalle ✅ · original ✅ · status ✅"]
-        SSE["SSE /api/events<br/>(pendiente)"]
+        SSE["SSE /api/events ✅<br/>snapshot + eventos en vivo"]
     end
 
     subgraph Datos
         PG[("PostgreSQL 18<br/>documents + GIN ✅")]
         FS[("STORAGE_DIR<br/>originales ✅")]
-        RQ[("Redis 8<br/>cola BullMQ ✅ · Pub/Sub (pendiente)")]
+        RQ[("Redis 8<br/>cola BullMQ ✅ · Pub/Sub ✅")]
     end
 
     W["Worker de indexación ✅<br/>proceso separado"]
@@ -33,8 +33,9 @@ flowchart LR
     RQ -- "trabajo" --> W
     W -- "lee original" --> FS
     W -- "UPDATE texto + tsvector + INDEXADO/ERROR" --> PG
-    W -. "publica evento" .-> RQ
-    RQ -. "suscripción" .-> SSE
+    W -- "PUBLISH cambio de estado" --> RQ
+    RQ -- "SUBSCRIBE (1 por instancia)" --> SSE
+    SSE -- "snapshot al conectar" --> PG
     REST -- "@@ tsquery (FTS)" --> PG
     REST -- "sendFile inline" --> FS
 ```
@@ -56,7 +57,7 @@ Líneas continuas: implementado. Líneas punteadas: pendiente.
 7. ✅ Se encola el `documentId` en BullMQ (`jobId = documentId`).
 8. ✅ La respuesta devuelve `id` + `PROCESANDO` por archivo, sin esperar a la indexación.
 9. ✅ El worker (proceso separado) toma el trabajo, lee el original, extrae el texto y, en un solo `UPDATE`, guarda el texto y el `search_vector` y cambia el estado a `INDEXADO`. Ante un fallo del propio documento, el estado pasa a `ERROR` con su causa.
-10. *(pendiente)* El worker publica el cambio de estado y la API lo notifica por SSE.
+10. ✅ El worker publica el cambio de estado en Redis Pub/Sub (con los datos de `UPDATE … RETURNING`), y cada instancia de la API lo reenvía por SSE a los clientes que siguen ese documento.
 
 ### Flujo de búsqueda y visor (HU-02, HU-03)
 
@@ -81,7 +82,7 @@ Líneas continuas: implementado. Líneas punteadas: pendiente.
 | `indexing/` | Cola BullMQ, worker (`worker.ts`), extracción TXT/MD/PDF, construcción del `tsvector`, reintentos y reconciliación | ✅ |
 | `search/` | Consulta FTS parametrizada, ranking, paginación y resaltado seguro | ✅ |
 | `documents/` (lectura) | Detalle, estado y archivo original (`DocumentsController`) | ✅ |
-| `events/` | Redis Pub/Sub → SSE | ⏳ |
+| `events/` | `StatusPublisher` (worker → Redis), `StatusStream` (Redis → API) y `EventsController` (SSE con snapshot) | ✅ |
 
 **Estilo de arquitectura:** modular por capas, con un módulo NestJS por capacidad (resolver/controlador → servicio → repositorio) y un worker en proceso separado. Se descartó una arquitectura hexagonal completa (puertos y adaptadores para cada dependencia): para un alcance de un día añade interfaces de una sola implementación sin beneficio práctico. La separación por módulos ya aísla las responsabilidades y permite extraer el worker o el motor de búsqueda más adelante.
 
@@ -96,7 +97,7 @@ Líneas continuas: implementado. Líneas punteadas: pendiente.
 | **PostgreSQL FTS** (`tsvector` + GIN) | Elasticsearch, OpenSearch, Meilisearch | Datos e índice en una sola tecnología: sin sincronización entre sistemas y sin un servicio extra que operar. Un motor dedicado se justificaría si las mediciones o el volumen lo exigen |
 | **TypeORM** | SQL puro, Prisma | Repositorios y migraciones integrados con Nest. El SQL crítico (esquema FTS, consultas de búsqueda) se escribe a mano y parametrizado, sin depender de las abstracciones del ORM |
 | **BullMQ + Redis** | Procesar dentro de la petición; cola en PostgreSQL (`SKIP LOCKED`) | La extracción de PDF puede tardar; la cola desacopla la respuesta, da reintentos y permite escalar workers |
-| **SSE** *(pendiente)* | WebSocket, suscripciones GraphQL | Solo se necesita comunicación servidor → cliente. SSE funciona sobre HTTP con reconexión nativa y sin protocolo adicional |
+| **SSE** | WebSocket, suscripciones GraphQL | Solo se necesita comunicación servidor → cliente. SSE funciona sobre HTTP con reconexión nativa y sin protocolo adicional |
 | **Vitest + Supertest** | Jest | Es el runner que genera el CLI de Nest 12; el mismo runner se usará en el frontend |
 
 ### Versiones de dependencias
@@ -214,12 +215,64 @@ El enunciado define el actor de HU-01 como "Administrador / Desarrollador" y el 
 
 El objetivo se interpreta como un máximo de 1 s: una respuesta más rápida cumple, y no se añade ningún retardo artificial. Se medirá la latencia HTTP de extremo a extremo (promedio y p95) con un volumen de datos representativo, junto con `EXPLAIN (ANALYZE, BUFFERS)`.
 
-## 3. Estrategia de tiempo real *(pendiente)*
+## 3. Estrategia de tiempo real
 
-Diseño previsto:
-1. El worker publica el cambio de estado en Redis Pub/Sub.
-2. La API retransmite el evento por SSE.
-3. Al conectar o reconectar, el cliente consulta el estado actual, porque Pub/Sub no conserva los mensajes. PostgreSQL es la fuente de verdad.
+La HU-04 prohíbe el *polling*: la interfaz debe enterarse cuando un documento pasa a `INDEXADO` o `ERROR` sin preguntar periódicamente.
+
+```mermaid
+sequenceDiagram
+    participant C as Navegador (EventSource)
+    participant A as API (instancia N)
+    participant R as Redis Pub/Sub
+    participant P as PostgreSQL
+    participant W as Worker
+
+    C->>A: GET /api/events?ids=X
+    A->>R: (ya suscrita al arrancar)
+    A-->>C: event: ready (retry: 3000)
+    A->>P: SELECT estado de X (snapshot)
+    A-->>C: event: status {X, PROCESANDO, updatedAt t1}
+    W->>P: UPDATE … SET status='INDEXADO' RETURNING …
+    W->>R: PUBLISH {X, INDEXADO, updatedAt t2}
+    R-->>A: mensaje
+    A-->>C: event: status {X, INDEXADO, t2}
+    Note over C,A: Si se corta la conexión, EventSource reconecta<br/>y el snapshot repone lo ocurrido mientras tanto
+```
+
+### Componentes
+
+| Pieza | Responsabilidad |
+|---|---|
+| `StatusPublisher` (worker) | Tras cada `UPDATE` que cambia el estado, publica `{ id, status, contentIndexed, errorMessage, updatedAt }` tomado de `RETURNING`: se publica exactamente lo que se guardó |
+| `StatusStream` (API) | **Una** conexión suscriptora por instancia, repartida con un `Subject` de RxJS a todos los clientes. Diez pestañas abiertas no abren diez conexiones a Redis |
+| `EventsController` (`@Sse`) | Por cliente: filtra por `ids`, envía el snapshot, los eventos en vivo y un heartbeat |
+
+### Decisiones
+
+| Decisión | Alternativa | Motivo |
+|---|---|---|
+| **SSE** | WebSocket; suscripciones GraphQL (`graphql-ws`) | La comunicación es solo servidor → cliente. SSE es HTTP estándar, `EventSource` reconecta solo y funciona con proxies sin protocolo extra. Las suscripciones GraphQL añadirían `graphql-ws` y un segundo transporte (WebSocket) para algo que SSE resuelve con un endpoint |
+| **Redis Pub/Sub** entre worker y API | Emisor en memoria (`EventEmitter`) | El worker es **otro proceso**: un emisor en memoria no cruza procesos. Con varias instancias de la API, cada una se suscribe y recibe el evento |
+| **Snapshot al conectar** (en el propio flujo SSE) | Solo eventos en vivo | **Pub/Sub no guarda mensajes:** un evento publicado sin nadie escuchando se pierde. El snapshot desde PostgreSQL, la fuente de verdad, repone el estado en cada conexión y reconexión. Verificado: un cambio ocurrido con el cliente desconectado llega al reconectar |
+| Suscribirse a lo vivo **antes** de leer el snapshot (`merge(live$, …, snapshot$)`) | Leer primero el snapshot | Si se leyera primero, un cambio ocurrido entre la lectura y la suscripción se perdería |
+| Cada evento lleva `updatedAt`; el cliente conserva el más reciente | Confiar en el orden de llegada | Snapshot y evento en vivo pueden llegar cruzados, y con concurrencia el worker publica en cualquier orden (observado en la prueba manual: el `ERROR` llegó antes que un `INDEXADO` anterior) |
+| Filtro `?ids=` (máx. 50, UUID validados) | Enviar todo a todos | Cada pestaña recibe solo lo que sigue. Sin `ids` recibe todo (útil para listados) |
+| Heartbeat como **comentario SSE** cada 25 s | Evento `ping` | `EventSource` ignora los comentarios. Mantienen viva la conexión a través de proxies con *timeout* por inactividad |
+| `retry: 3000` | Valor por defecto del navegador | Reconexión rápida y predecible tras un corte |
+| Publicar nunca falla la indexación | Propagar el error | El estado ya está en PostgreSQL; el snapshot recupera el evento perdido |
+| Canal configurable (`EVENTS_CHANNEL`) | Fijo | Pub/Sub ignora el número de base Redis: pruebas y demo sobre el mismo Redis usan canales distintos |
+| Solo se publican los estados finales | Publicar también `PROCESANDO` | El cliente ya conoce el `PROCESANDO` por la respuesta de la carga. La HU-04 pide notificar `INDEXADO` o `ERROR` |
+
+### Fallos de red y degradación
+
+| Situación | Comportamiento |
+|---|---|
+| El cliente pierde la conexión | `EventSource` reconecta cada 3 s; al reconectar recibe el snapshot actualizado |
+| Redis cae un momento | *No probado.* Por diseño, un error de publicación se captura y no revierte la indexación, que ya está en PostgreSQL. Pero sin Redis tampoco funciona la cola, así que el worker deja de recibir trabajos hasta que vuelve, e `ioredis` retiene los comandos mientras reconecta. Al recuperarse, los clientes obtienen el estado correcto con el snapshot de su siguiente (re)conexión |
+| Se reinicia la API | Las conexiones SSE se cierran, `EventSource` reconecta (comportamiento estándar del navegador) y llega el snapshot |
+| Varias instancias de la API | Cada una tiene su suscripción; el cliente puede reconectar a cualquiera |
+
+**Limitación conocida:** si Redis falla mientras el cliente sigue conectado, ese cliente no ve el cambio hasta que se reconecta (no hay re-snapshot periódico). PostgreSQL mantiene el estado correcto y `GET /api/documents/:id/status` lo devuelve.
 
 ## 4. Escalabilidad *(pendiente de completar)*
 
@@ -245,6 +298,7 @@ Diseño previsto:
 - Los fragmentos resaltados solo cubren los primeros 50 000 caracteres de cada documento.
 - Sin *stemming* (diccionario `simple`): no hay coincidencia entre singular y plural.
 - La latencia de búsqueda todavía no se ha medido con un volumen representativo (pendiente de la etapa de medición).
+- SSE: un evento publicado mientras Redis está caído y el cliente sigue conectado no llega hasta la siguiente reconexión de ese cliente.
 - La reconciliación de documentos atascados ocurre solo al arrancar el worker, no de forma periódica.
 - No se ha probado la carga con Redis caído. Por diseño, el documento queda registrado y se recupera con la reconciliación, pero no se ha medido cuánto tarda en responder `queue.add` mientras Redis no está disponible.
 - Las migraciones se ejecutan al arrancar la API; no es apto para varias réplicas sin un paso de despliegue dedicado.

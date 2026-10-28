@@ -6,8 +6,13 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DataSource } from 'typeorm';
 import { appConfig } from '../common/config.js';
+import { DocumentStatusEvent } from '../events/document-status-event.js';
+import { StatusPublisher } from '../events/status-publisher.service.js';
 import { INDEXING_QUEUE, IndexingJob } from './indexing-queue.module.js';
 import { ExtractionError, extractDocumentText } from './text-extraction.js';
+
+// Lo que se publica como evento sale de la fila recién escrita, no de un valor calculado aparte.
+const RETURNING_STATUS = 'id, status, content_indexed, error_message, updated_at';
 
 // Pesos: una coincidencia en el título (A) puntúa más que en metadatos (B) o en el contenido (C).
 // Diccionario 'simple': sin stemming ni stopwords, válido para un corpus técnico multilingüe.
@@ -25,11 +30,21 @@ const MARK_INDEXED_SQL = `
     error_message = NULL,
     indexed_at = now(),
     updated_at = now()
-  WHERE id = $1 AND status = 'PROCESANDO'`;
+  WHERE id = $1 AND status = 'PROCESANDO'
+  RETURNING ${RETURNING_STATUS}`;
 
 const MARK_ERROR_SQL = `
   UPDATE documents SET status = 'ERROR', error_message = $2, updated_at = now()
-  WHERE id = $1 AND status = 'PROCESANDO'`;
+  WHERE id = $1 AND status = 'PROCESANDO'
+  RETURNING ${RETURNING_STATUS}`;
+
+type StatusRow = {
+  id: string;
+  status: DocumentStatusEvent['status'];
+  content_indexed: boolean;
+  error_message: string | null;
+  updated_at: Date;
+};
 
 // SQLSTATE 54000: el texto supera el tamaño máximo de un tsvector (1 MB).
 const PROGRAM_LIMIT_EXCEEDED = '54000';
@@ -41,6 +56,7 @@ export class IndexingService {
   constructor(
     @InjectDataSource() private readonly db: DataSource,
     @InjectQueue(INDEXING_QUEUE) private readonly queue: Queue<IndexingJob>,
+    private readonly publisher: StatusPublisher,
   ) {}
 
   /**
@@ -67,13 +83,12 @@ export class IndexingService {
     }
 
     try {
-      // En UPDATE, TypeORM devuelve [filas, filasAfectadas]; 0 = otro proceso ya lo cerró.
-      const [, updated] = await this.db.query(MARK_INDEXED_SQL, [documentId, text]);
-      if (updated && text) {
-        this.logger.log(`Documento ${documentId} indexado (${text.length} caracteres)`);
-      } else if (updated) {
-        this.logger.warn(`Documento ${documentId} indexado solo por metadatos: sin texto extraíble`);
-      }
+      // En UPDATE, TypeORM devuelve [filas, filasAfectadas]; sin filas = otro proceso ya lo cerró.
+      const [[row]] = await this.db.query<[StatusRow[], number]>(MARK_INDEXED_SQL, [documentId, text]);
+      if (!row) return;
+      if (text) this.logger.log(`Documento ${documentId} indexado (${text.length} caracteres)`);
+      else this.logger.warn(`Documento ${documentId} indexado solo por metadatos: sin texto extraíble`);
+      await this.publish(row);
     } catch (error) {
       if ((error as { code?: string }).code === PROGRAM_LIMIT_EXCEEDED) {
         return this.markError(documentId, 'El documento tiene demasiado texto para indexarse');
@@ -83,8 +98,20 @@ export class IndexingService {
   }
 
   async markError(documentId: string, message: string): Promise<void> {
-    const [, updated] = await this.db.query(MARK_ERROR_SQL, [documentId, message]);
-    if (updated) this.logger.warn(`Documento ${documentId} en ERROR: ${message}`);
+    const [[row]] = await this.db.query<[StatusRow[], number]>(MARK_ERROR_SQL, [documentId, message]);
+    if (!row) return;
+    this.logger.warn(`Documento ${documentId} en ERROR: ${message}`);
+    await this.publish(row);
+  }
+
+  private publish(row: StatusRow): Promise<void> {
+    return this.publisher.publish({
+      id: row.id,
+      status: row.status,
+      contentIndexed: row.content_indexed,
+      errorMessage: row.error_message,
+      updatedAt: row.updated_at.toISOString(),
+    });
   }
 
   /**
