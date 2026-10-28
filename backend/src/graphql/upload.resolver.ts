@@ -1,6 +1,8 @@
+import { UseGuards } from '@nestjs/common';
 import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
 import GraphQLUpload from 'graphql-upload/GraphQLUpload.mjs';
 import type { FileUpload } from 'graphql-upload/processRequest.mjs';
+import { GqlAuthGuard } from '../auth/gql-auth.guard.js';
 import { appConfig } from '../common/config.js';
 import { DocumentsService } from '../documents/documents.service.js';
 import {
@@ -26,6 +28,7 @@ export class UploadResolver {
   }
 
   @Mutation(() => [DocumentUploadResult])
+  @UseGuards(GqlAuthGuard)
   uploadDocuments(
     @Args({ name: 'files', type: () => [GraphQLUpload] })
     files: Promise<FileUpload>[],

@@ -12,7 +12,7 @@ flowchart LR
 
     subgraph API["Backend · NestJS"]
         GQL["GraphQL /graphql<br/>uploadDocuments ✅"]
-        REST["REST /api<br/>health ✅ · búsqueda, detalle,<br/>original, login (pendiente)"]
+        REST["REST /api<br/>health ✅ · auth/login ✅<br/>búsqueda, detalle, original (pendiente)"]
         SSE["SSE /api/events<br/>(pendiente)"]
     end
 
@@ -42,17 +42,18 @@ Líneas continuas: implementado. Líneas punteadas: pendiente.
 
 ### Flujo de carga (HU-01)
 
-1. *(pendiente)* El administrador inicia sesión y obtiene un JWT.
-2. ✅ El cliente envía la mutación `uploadDocuments(files, input)` como `multipart/form-data`. `input.documents[i]` contiene los metadatos de `files[i]`.
-3. ✅ El middleware `graphql-upload` interpreta el multipart y aplica `MAX_UPLOAD_BYTES` y `MAX_FILES_PER_UPLOAD`. Apollo rechaza la petición sin la cabecera de preflight (CSRF).
-4. ✅ `ValidationPipe` valida y normaliza los metadatos.
-5. ✅ Por cada archivo:
+1. ✅ El administrador inicia sesión (`POST /api/auth/login`) y obtiene un JWT de 8 h.
+2. ✅ Un middleware rechaza con 401 cualquier petición multipart a `/graphql` sin un Bearer válido, **antes** de leer los archivos.
+3. ✅ El cliente envía la mutación `uploadDocuments(files, input)` como `multipart/form-data`. `input.documents[i]` contiene los metadatos de `files[i]`.
+4. ✅ El middleware `graphql-upload` interpreta el multipart y aplica `MAX_UPLOAD_BYTES` y `MAX_FILES_PER_UPLOAD`. Apollo rechaza la petición sin la cabecera de preflight (CSRF).
+5. ✅ `GqlAuthGuard` vuelve a verificar el token en el resolver, y `ValidationPipe` valida y normaliza los metadatos.
+6. ✅ Por cada archivo:
    1. Se valida la extensión.
    2. Se guarda por streaming con un UUID como nombre.
    3. Se verifica que el contenido corresponda a la extensión.
    4. Se inserta la fila `PROCESANDO`.
-6. *(pendiente)* Se encola el `documentId` en BullMQ.
-7. ✅ La respuesta devuelve `id` + `PROCESANDO` por archivo, sin esperar a la indexación.
+7. *(pendiente)* Se encola el `documentId` en BullMQ.
+8. ✅ La respuesta devuelve `id` + `PROCESANDO` por archivo, sin esperar a la indexación.
 
 ### Responsabilidad de los módulos
 
@@ -62,7 +63,7 @@ Líneas continuas: implementado. Líneas punteadas: pendiente.
 | `database/` | Configuración de TypeORM y migraciones SQL | ✅ |
 | `documents/` | Entidad, carga y almacenamiento, validación de archivos, DTOs | ✅ |
 | `graphql/` | Resolvers GraphQL (`uploadDocuments`, `uploadLimits`) | ✅ |
-| `auth/` | Login del administrador y guard JWT | ⏳ |
+| `auth/` | Login del administrador, emisión y verificación de JWT, guard GraphQL, límite de intentos | ✅ |
 | `indexing/` | Cola BullMQ, worker y extractores TXT/MD/PDF | ⏳ |
 | `search/` | Consultas FTS parametrizadas, ranking y resaltado | ⏳ |
 | `events/` | Redis Pub/Sub → SSE | ⏳ |
@@ -102,6 +103,31 @@ Líneas continuas: implementado. Líneas punteadas: pendiente.
 | `MAX_UPLOAD_BYTES` = 10 MB, inclusivo y configurable | El enunciado no fija un valor; 10 MB es la orientación acordada. busboy corta al **alcanzar** el límite, por eso se le pasa `límite + 1` |
 | `csrfPrevention` de Apollo activo | Un formulario de otro sitio puede enviar `multipart/form-data` sin preflight CORS; exigir una cabecera personalizada lo impide |
 | HTTP 200 con `PROCESANDO` en el payload (no 202) | En GraphQL el código HTTP indica que la operación se procesó; el estado asíncrono del documento va en los datos |
+
+### Modelo de permisos: administrador único
+
+| Acción | Acceso |
+|---|---|
+| Subir documentos (`uploadDocuments`) | Solo administrador (JWT) |
+| Buscar, ver detalle y visor, consultar `uploadLimits`, health | Público |
+| Registro, recuperación de contraseña, roles | No existen (fuera de alcance) |
+
+El enunciado define el actor de HU-01 como "Administrador / Desarrollador" y el de HU-02/03 como "Usuario". La aclaración posterior pide un login para un único administrador.
+
+| Decisión | Alternativa | Motivo |
+|---|---|---|
+| Credenciales en el entorno: `ADMIN_USERNAME` + `ADMIN_PASSWORD_HASH` | Tabla `users` con semilla | Con un solo usuario, una tabla añade migración, semilla y CRUD sin aportar nada. Si se necesitaran más usuarios, se pasaría a tabla |
+| **Hash bcrypt** (`bcryptjs`, coste 12) en el `.env`, nunca la contraseña en claro | argon2 (nativo), `crypto.scrypt` | El kata pide bcrypt o argon2. `bcryptjs` es JavaScript puro: no necesita scripts de instalación nativos, que npm 11 pide aprobar explícitamente (`allowScripts`, observado al instalar `@apollo/protobufjs`) y que suelen dar problemas de compilación en Windows. Mismo formato `$2b$` que bcrypt |
+| `npm run hash-password` lee la contraseña **sin eco** | Pasarla como argumento | Un argumento queda en el historial de la shell y en la lista de procesos |
+| Hash entre comillas simples en `.env` | Sin comillas | El hash contiene `$`, y las comillas simples evitan que se interprete como variable. Verificado con `process.loadEnvFile`; con Docker Compose se verificará al dockerizar la API |
+| **Arranque fallido** si `JWT_SECRET` tiene menos de 32 caracteres o `ADMIN_PASSWORD_HASH` no es bcrypt | Valores por defecto | Es preferible que la API no levante a que levante con un secreto débil. El `.env.example` deja ambos vacíos a propósito |
+| JWT HS256, 8 h, sin refresh token | Sesión en servidor, refresh tokens | API sin estado entre peticiones (escala sin sesión compartida). 8 h cubren una jornada; un refresh token añade almacenamiento y rotación sin aportar a una demo |
+| Algoritmo fijado al verificar (`algorithms: ['HS256']`) | Aceptar el del token | Impide ataques de confusión de algoritmo (`alg: none`) |
+| bcrypt se ejecuta aunque el usuario no exista; usuario comparado en tiempo constante; mismo mensaje para ambos fallos | Responder antes | No revela si el usuario existe, ni por el mensaje ni por el tiempo de respuesta |
+| Límite de **5 intentos por IP y minuto** en el login (`@nestjs/throttler`, 429) | Sin límite | Frena la fuerza bruta. Límite conocido: el contador vive en memoria por instancia; con réplicas, almacenarlo en Redis |
+| **Middleware** que rechaza el multipart sin token **antes** de `graphql-upload` | Solo el guard del resolver | El guard se ejecuta después de que `graphql-upload` reciba los archivos: un anónimo podría hacer que el servidor recibiera hasta 10 × 10 MB por petición |
+| **Además**, `GqlAuthGuard` en la mutación | Solo middleware | Autorización declarativa en el resolver (lo pide el kata). Protege cualquier mutación futura que no sea multipart (defensa en profundidad) |
+| Sin revocación de tokens | Lista negra en Redis | Con un único administrador y una caducidad de 8 h, rotar `JWT_SECRET` basta para invalidar todos los tokens |
 
 ### Modelo de datos (migración `CreateDocuments`)
 
@@ -152,6 +178,7 @@ Diseño previsto:
 
 ## 6. Limitaciones conocidas
 
-- La carga todavía no exige autenticación.
+- Límite de intentos de login en memoria por instancia (ver modelo de permisos).
+- No hay revocación de tokens antes de su caducidad.
 - No hay indexación todavía: los documentos permanecen en `PROCESANDO`.
 - Las migraciones se ejecutan al arrancar la API; no es apto para varias réplicas sin un paso de despliegue dedicado.

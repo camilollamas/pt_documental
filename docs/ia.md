@@ -2,38 +2,91 @@
 
 > Documento vivo: se actualiza al cerrar cada bloque con lo que realmente ocurrió.
 
+## Enfoque de trabajo
+
+La IA se usó como **asistente de implementación bajo dirección técnica del desarrollador**. El desarrollador:
+
+- **Define el marco técnico** antes de escribir código: entrega un documento técnico con el stack, las restricciones (FTS sin `LIKE`, carga por GraphQL multipart, SSE sin polling, administrador único), la estructura del repositorio y las reglas de trabajo.
+- **Decide** el alcance y los criterios cuando hay alternativas.
+- **Audita** cada entrega antes de continuar y **controla el versionado**: la IA no hace commits ni push.
+
+El trabajo avanza en **bloques pequeños y verificables**. Cada bloque se cierra con:
+1. lo que se implementó y por qué;
+2. las alternativas descartadas;
+3. los comandos para verificarlo de forma independiente;
+4. las preguntas técnicas previsibles.
+
+Solo con el visto bueno del desarrollador se pasa al siguiente bloque.
+
 ## 1. Herramientas utilizadas
 
 | Herramienta | Uso |
 |---|---|
-| **Claude Code** (modelo Claude Opus 5.5), extensión de VS Code | Asistente de desarrollo: análisis del enunciado, planificación, generación de código y pruebas, diagnóstico de errores y redacción de documentación |
+| **Claude Code** (modelo Claude Opus 5.5), extensión de VS Code | Análisis de requisitos, propuesta de plan, generación de código y pruebas, diagnóstico de errores y borradores de documentación |
 | **Context7** (servidor MCP de documentación) | Consulta de la documentación vigente de TypeORM 1.x para no usar APIs obsoletas |
 
 ## 2. Casos de uso por etapa
 
-| Etapa | Qué hizo la IA | Qué hizo el desarrollador |
+| Etapa | Dirección y decisiones del desarrollador | Aporte de la IA |
 |---|---|---|
-| Análisis y planificación | Leyó el enunciado (PDF) y el documento de aclaraciones. Propuso un plan por bloques y una matriz requisito → implementación → prueba. Auditó la coherencia entre ambos documentos | Definió el stack y las aclaraciones de alcance. Decidió usar los estados del enunciado (`PROCESANDO`/`INDEXADO`/`ERROR`) frente a los nombres en inglés propuestos |
-| Bloque 1: carga GraphQL multipart | Generó el esqueleto NestJS, la mutación de carga, la validación de archivos y las pruebas. Diagnosticó el bug de npm 10, el conflicto de versiones `graphql`/`graphql-upload` y el corte de busboy en el límite exacto | Revisó el bloque, hizo el commit y pidió un mensaje de commit más detallado |
-| Bloque 2a: persistencia | Generó `docker-compose.yml`, la migración SQL, la entidad y las pruebas contra PostgreSQL real. Documentó la migración línea por línea | Fijó las decisiones de credenciales (hash en `.env`), duración del JWT (8 h) y puerto (5432). Pidió que la migración viniera explicada para poder defenderla. Movió `.env.example` a `backend/` |
-| Auditoría de estructura | Contrastó el repositorio con el punto 5 del enunciado. Detectó la documentación faltante, el `.gitignore` sin versionar y el mensaje truncado del primer commit | Solicitó la auditoría, creó el repositorio remoto y ordenó aplicar las recomendaciones |
+| Análisis y planificación | Aporta el documento técnico (stack, restricciones, estructura y reglas). Pide contrastar el plan con el enunciado oficial. Detectada la discrepancia en los nombres de estado, **decide usar los literales del enunciado** (`PROCESANDO`/`INDEXADO`/`ERROR`) | Lee el enunciado y el documento técnico, propone un plan por bloques y una matriz requisito → implementación → prueba, y señala las diferencias entre ambos documentos |
+| Bloque 1: carga GraphQL multipart | Define la carga por GraphQL multipart con metadatos. Revisa el bloque, gestiona el commit y exige un mensaje de commit que describa con detalle lo implementado | Genera el esqueleto NestJS, la mutación, la validación de archivos y las pruebas. Diagnostica un bug de npm 10, un conflicto de versiones `graphql`/`graphql-upload` y el corte de busboy en el límite exacto de tamaño |
+| Bloque 2a: persistencia | Fija la política de credenciales (hash en el entorno, nunca en claro), la duración del token (8 h, sin refresh) y el puerto de PostgreSQL. Exige que la migración SQL venga **explicada línea por línea** para poder defenderla. Reubica `.env.example` en `backend/` | Genera `docker-compose.yml`, la migración (índice GIN, `CHECK` de estados), la entidad y las pruebas contra PostgreSQL real |
+| Auditoría de estructura | Pide una **auditoría** del repositorio contra el punto 5 del enunciado. Crea el repositorio remoto y ordena adelantar la documentación obligatoria | Contrasta la estructura, detecta la documentación faltante, el `.gitignore` sin versionar y un mensaje de commit truncado, y propone correcciones |
+| Bloque 2b: login del administrador | Valida el diseño de autenticación. Decide **no reescribir** el historial de Git, priorizando avanzar | Genera el módulo de autenticación, el script de hash y las pruebas. Detecta que el guard actúa después de recibir los archivos y añade un middleware previo |
 
 ## 3. Prompts clave y cómo se refinaron
 
-1. **Planificación.** *"Crea un archivo .claude con indicaciones internas para realizar lo que está en AGENTS_TECH_LEAD_KATA.md, actuando como desarrollador senior… analiza el documento y plantea el plan de trabajo."* Se refinó con: *"el PDF está en la carpeta .claude para que audites si coincide lo planteado con lo que indica"*. Eso llevó a una tabla de discrepancias entre el PDF y el plan.
-2. **Forma de trabajo.** Se pidió avanzar por bloques auditables, entendiendo cada parte antes de continuar. De ahí salió el flujo: bloque pequeño → guía de auditoría (qué hace, por qué, alternativas, cómo probarlo, preguntas de sustentación) → visto bueno → siguiente bloque.
-3. **Documentación del proceso.** *"De lo que se vaya haciendo, tecnologías implementadas en cada etapa… déjalo en un archivo .md"*. Resultado: un registro técnico interno por etapa, que es la base de este documento y de `architecture.md`.
-4. **Migración SQL.** *"Hazlo tú y lo dejas bien explicado"*. Resultado: la migración con la explicación de cada columna, restricción e índice.
-5. **Auditoría.** *"Actúa como desarrollador experto auditor y valida si estamos cumpliendo con el punto 5 del PDF"*. Resultado: los hallazgos que motivaron este esqueleto documental.
+Los prompts se muestran resumidos y con la redacción limpiada; el sentido es el original.
 
-## 4. Validación humana
+1. **Planificación inicial.**
+   > "Analiza el documento de instrucciones técnicas y plantea el plan de trabajo. Actúa como desarrollador senior: documenta y sustenta el porqué de cada decisión técnica."
 
-- **Ejecución verificable.** Cada bloque se entrega con comandos reproducibles (`npm test`, `npm run test:e2e`, `curl` contra el servidor y `\d documents` en PostgreSQL) y sus resultados.
-- **Pruebas que encontraron errores reales:**
-  - La prueba del umbral de tamaño detectó que un archivo de exactamente 10 MB se rechazaba (busboy corta al alcanzar el límite).
-  - En la revisión del Bloque 2a se encontró una aserción que no comprobaba nada (`length >= 0`) y se reemplazó por una real.
-- **Afirmaciones técnicas verificadas en la base de datos** antes de documentarlas: el ejemplo de `tsvector` y la volatilidad de `array_to_string`.
-- **Decisiones de alcance del desarrollador:** estados del enunciado, valores por defecto de autenticación, ubicación de `.env.example`, exclusión de la carpeta de trabajo de la IA del repositorio.
-- **Control de versiones manual:** los commits los realiza el desarrollador, no la IA.
+   *Refinamiento:* "Revisa el PDF del enunciado y audita si lo planteado coincide con lo que pide." Esto convirtió el plan en una tabla de discrepancias entre el enunciado y el documento técnico, que se resolvieron una a una.
 
-*(Se completa en cada bloque.)*
+2. **Forma de trabajo.**
+   > "Necesito ir auditando y entendiendo lo que se va haciendo."
+
+   *Resultado:* entregas por bloques, cada una con una guía de auditoría, y ningún avance sin aprobación.
+
+3. **Trazabilidad técnica.**
+   > "De lo que se vaya haciendo, registra las tecnologías implementadas en cada etapa y la documentación que haga falta explicar."
+
+   *Resultado:* un registro técnico por etapa (conceptos, decisiones, problemas, evidencia), que es la base de `architecture.md` y de este documento.
+
+4. **Commits.**
+   > "Dame un mensaje de commit más detallado, que describa lo que se implementó."
+
+   *Refinamiento:* tras revisar el historial, los mensajes se pasan con `git commit -F` para que no se trunquen.
+
+5. **Migración SQL.**
+   > "Escríbela tú, pero déjala bien explicada."
+
+   *Resultado:* la migración con la justificación de cada columna, restricción e índice (por qué FTS y no `LIKE`, GIN frente a GiST, `TEXT` + `CHECK` frente a `ENUM`).
+
+6. **Auditoría de entrega.**
+   > "Actúa como desarrollador auditor y valida si cumplimos la estructura de entrega del punto 5 del PDF, y si es coherente con el documento técnico."
+
+   *Resultado:* hallazgos priorizados que motivaron adelantar `README.md`, `architecture.md` y este documento.
+
+## 4. Validación humana y control de calidad
+
+### Mecanismos de control aplicados
+- **Aprobación por bloque.** Ningún bloque se considera cerrado sin la revisión del desarrollador de su guía de auditoría.
+- **Decisiones reservadas al desarrollador:** alcance, nombres de estado, política de credenciales, duración del token, estructura de archivos y gestión del historial de Git.
+- **Control de versiones manual.** Todos los commits y push los ejecuta el desarrollador. La IA solo propone el mensaje.
+- **Auditorías solicitadas expresamente** sobre la coherencia del plan con el enunciado y sobre la estructura de entrega.
+
+### Errores de la IA detectados por las pruebas o la revisión
+- La prueba del umbral de tamaño detectó que un archivo de exactamente 10 MB se rechazaba (busboy corta al alcanzar el límite). Se corrigió.
+- Una aserción de prueba no comprobaba nada (`length >= 0`) y se reemplazó por una real.
+- El valor de ejemplo de `JWT_SECRET` en `.env.example` habría superado la validación de longitud y permitido arrancar con un secreto público. Ahora se deja vacío.
+- Dos afirmaciones de la documentación técnica no estaban comprobadas y se matizaron para que solo digan lo verificado.
+- Una prueba manual dejó una fila en la base de datos de la demo, y se eliminó.
+
+### Verificaciones ejecutadas por el desarrollador
+*(Registrar aquí las verificaciones que el desarrollador ejecute personalmente: comando, fecha y resultado.)*
+
+| Fecha | Verificación | Resultado |
+|---|---|---|
+| | | |

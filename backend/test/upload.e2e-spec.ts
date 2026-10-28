@@ -1,48 +1,30 @@
 import { INestApplication } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import request from 'supertest';
 import { DataSource } from 'typeorm';
-import { AppModule } from '../src/app.module.js';
-import { configureApp } from '../src/app.setup.js';
+import { createTestApp, loginAsAdmin, metadata, TestFile, uploadRequest } from './helpers.js';
 
 const MAX_BYTES = 1024;
-
-const UPLOAD_MUTATION = `
-  mutation Upload($files: [Upload!]!, $input: UploadDocumentsInput!) {
-    uploadDocuments(files: $files, input: $input) { filename id status error }
-  }`;
-
-const metadata = (title: string) => ({
-  title,
-  author: 'Equipo QA',
-  category: 'Manual',
-  tags: ['api', ' api ', 'pruebas'],
-  version: '1.0',
-});
-
-type TestFile = { name: string; content: Buffer };
 
 describe('Carga de documentos (GraphQL multipart)', () => {
   let app: INestApplication;
   let db: DataSource;
   let storageDir: string;
+  let authHeaders: Record<string, string>;
 
   beforeAll(async () => {
     storageDir = await mkdtemp(join(tmpdir(), 'docs-e2e-'));
-    process.env.DATABASE_URL =
-      process.env.TEST_DATABASE_URL ?? 'postgres://docs:docs_local@localhost:5432/documents_test';
-    process.env.STORAGE_DIR = storageDir;
-    process.env.MAX_UPLOAD_BYTES = String(MAX_BYTES);
-    process.env.MAX_FILES_PER_UPLOAD = '3';
-
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = moduleRef.createNestApplication();
-    configureApp(app);
-    await app.init();
+    app = await createTestApp({
+      STORAGE_DIR: storageDir,
+      MAX_UPLOAD_BYTES: String(MAX_BYTES),
+      MAX_FILES_PER_UPLOAD: '3',
+    });
     db = app.get(DataSource);
+    authHeaders = {
+      'apollo-require-preflight': 'true',
+      authorization: `Bearer ${await loginAsAdmin(app)}`,
+    };
   });
 
   beforeEach(() => db.query('TRUNCATE documents'));
@@ -52,25 +34,11 @@ describe('Carga de documentos (GraphQL multipart)', () => {
     await rm(storageDir, { recursive: true, force: true });
   });
 
-  /** Construye la petición según https://github.com/jaydenseric/graphql-multipart-request-spec */
-  function upload(
+  const upload = (
     files: TestFile[],
     documents = files.map((f) => metadata(f.name)),
-    headers: Record<string, string> = { 'apollo-require-preflight': 'true' },
-  ) {
-    const operations = {
-      query: UPLOAD_MUTATION,
-      variables: { files: files.map(() => null), input: { documents } },
-    };
-    const map = Object.fromEntries(files.map((_, i) => [String(i), [`variables.files.${i}`]]));
-    let req = request(app.getHttpServer())
-      .post('/graphql')
-      .set(headers)
-      .field('operations', JSON.stringify(operations))
-      .field('map', JSON.stringify(map));
-    files.forEach((f, i) => (req = req.attach(String(i), f.content, f.name)));
-    return req;
-  }
+    headers = authHeaders,
+  ) => uploadRequest(app, files, headers, documents);
 
   const txt = { name: 'guia.txt', content: Buffer.from('Guía de instalación del servidor') };
   const md = { name: 'readme.md', content: Buffer.from('# Arquitectura\n\nTexto **técnico**') };
@@ -170,7 +138,7 @@ describe('Carga de documentos (GraphQL multipart)', () => {
   });
 
   it('bloquea la petición multipart sin cabecera de preflight (protección CSRF)', async () => {
-    const res = await upload([txt], undefined, {});
+    const res = await upload([txt], undefined, { authorization: authHeaders.authorization });
     expect(res.status).toBe(400);
     expect(res.text).toMatch(/CSRF/i);
   });
