@@ -1,3 +1,7 @@
+/** "1 resultado", "25 resultados" o "más de 1000 resultados" cuando la API cuenta con tope. */
+export const totalLabel = (total: number, capped: boolean) =>
+  capped ? `más de ${total} resultados` : `${total} ${total === 1 ? 'resultado' : 'resultados'}`;
+
 /** Hasta 7 números; el resto se resume con "…" junto a la primera y la última página. */
 export function pageWindow(page: number, pages: number): (number | '…')[] {
   if (pages <= 7) return Array.from({ length: pages }, (_, i) => i + 1);

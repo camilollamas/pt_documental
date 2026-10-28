@@ -110,6 +110,7 @@ API_URL=http://localhost:3100 npm run dev     # PowerShell: $env:API_URL="http:/
 | `TEST_REDIS_URL` | `redis://localhost:6379/1` | Base Redis de las pruebas e2e |
 | `INDEXING_CONCURRENCY` | `2` | Documentos indexados en paralelo por worker |
 | `EVENTS_CHANNEL` | `document-status` | Canal Redis Pub/Sub de los cambios de estado. La API y el worker deben usar el mismo |
+| `SEARCH_COUNT_CAP` | `1000` | Tope del conteo de resultados: por encima, la API responde `totalCapped: true` ("más de 1000 resultados") |
 | `STORAGE_DIR` | `./storage` | Carpeta de los archivos originales (ignorada por Git). La API y el worker deben apuntar a la misma |
 | `MAX_UPLOAD_BYTES` | `10485760` (10 MB) | Tamaño máximo por archivo, inclusivo |
 | `MAX_FILES_PER_UPLOAD` | `10` | Máximo de archivos por lote |
@@ -135,14 +136,22 @@ Las credenciales incorrectas devuelven `401 Credenciales inválidas`, con el mis
 
 La carga usa el [GraphQL multipart request spec](https://github.com/jaydenseric/graphql-multipart-request-spec). `documents[i]` contiene los metadatos de `files[i]`. Son obligatorias dos cabeceras: `Authorization: Bearer <token>` y `apollo-require-preflight` (protección CSRF).
 
+Guarde la operación en un archivo UTF-8, `operations.json`:
+
+```json
+{"query":"mutation($files:[Upload!]!,$input:UploadDocumentsInput!){uploadDocuments(files:$files,input:$input){filename id status error}}","variables":{"files":[null],"input":{"documents":[{"title":"Guía de instalación","author":"Equipo Infra","category":"Manual","tags":["servidor","linux"],"version":"1.0"}]}}}
+```
+
 ```bash
 curl http://localhost:3000/graphql \
   -H "authorization: Bearer $TOKEN" \
   -H "apollo-require-preflight: true" \
-  -F operations='{"query":"mutation($files:[Upload!]!,$input:UploadDocumentsInput!){uploadDocuments(files:$files,input:$input){filename id status error}}","variables":{"files":[null],"input":{"documents":[{"title":"Guía de instalación","author":"Equipo Infra","category":"Manual","tags":["servidor","linux"],"version":"1.0"}]}}}' \
+  -F "operations=<operations.json" \
   -F map='{"0":["variables.files.0"]}' \
   -F 0=@guia.txt
 ```
+
+> **Por qué un archivo:** en Windows, `curl` convierte los argumentos de la línea de comandos a la página de códigos del sistema, así que las tildes de un JSON escrito en el propio comando llegan dañadas (`Gu�a`). Con `<operations.json`, `curl` envía el archivo tal cual. La API rechaza los metadatos con `�` (texto en otra codificación) para no guardarlos dañados. La interfaz web no tiene este problema.
 
 Respuesta inmediata, sin esperar a la indexación:
 
@@ -186,7 +195,7 @@ curl "http://localhost:3000/api/documents?query=prometheus&page=1&pageSize=10"
     "author": "SRE", "category": "Guia", "tags": ["monitoreo"], "version": "1.0",
     "mimeType": "application/pdf", "contentIndexed": true, "rank": 0.2, "…": "…"
   }],
-  "total": 1, "page": 1, "pageSize": 10
+  "total": 1, "totalCapped": false, "page": 1, "pageSize": 10
 }
 ```
 
@@ -269,6 +278,22 @@ npm run lint
 npm run build       # comprobación de tipos + build de producción
 ```
 
+## Datos de prueba y medición de la búsqueda
+
+Con la API y el worker en marcha:
+
+```bash
+cd backend
+npm run seed                    # 10 000 documentos técnicos sintéticos (SEED_COUNT para cambiar la cantidad)
+npm run build && npm run benchmark   # latencia HTTP p50/p95, Server-Timing, 10 clientes y EXPLAIN → docs/benchmark.md
+npm run seed -- --clean         # borra los documentos sembrados (etiqueta "semilla")
+```
+
+- La siembra genera texto reproducible (semilla fija) y lo indexa **por el pipeline real**: filas en `PROCESANDO`, archivos en `STORAGE_DIR` y trabajos en la cola.
+- El benchmark mide la consulta **exacta** de la API y escribe el informe con el hardware y el corpus.
+- Resultado registrado: [docs/benchmark.md](docs/benchmark.md). Diagnóstico y optimización: [docs/architecture.md](docs/architecture.md) → "Latencia: medición y optimización".
+- Tras una carga masiva conviene ejecutar `VACUUM ANALYZE documents;`: actualiza las estadísticas y vacía la lista pendiente del índice GIN.
+
 ## Estructura
 
 ```text
@@ -321,7 +346,7 @@ npm run build       # comprobación de tipos + build de producción
 | HU-01 | Carga en la interfaz (arrastrar y soltar, metadatos, validación con los límites de la API) | ✅ Implementada |
 | HU-04 | Notificaciones en tiempo real (SSE + Redis Pub/Sub, sin polling) (API) | ✅ Implementada |
 | HU-04 | Actualización reactiva en la interfaz (carga y detalle, sin polling) | ✅ Implementada |
-| — | Medición de latencia de búsqueda | ⏳ Pendiente |
+| — | Medición de latencia de búsqueda con 10 000 documentos ([docs/benchmark.md](docs/benchmark.md)) | ✅ p95 371 ms (un cliente) · 778 ms (10 clientes) |
 
 ## Alcance: enunciado y aclaraciones posteriores
 

@@ -64,7 +64,7 @@ Líneas continuas: implementado. Líneas punteadas: pendiente.
 1. `GET /api/documents?query=…&page=…&pageSize=…` → `ValidationPipe` (query ≤ 200 caracteres, página ≤ 1000, tamaño ≤ 50).
 2. Una sola consulta SQL parametrizada:
    1. la CTE `page` filtra `status = 'INDEXADO' AND search_vector @@ websearch_to_tsquery('simple', $1)` con el índice GIN;
-   2. ordena por `ts_rank_cd DESC, created_at DESC, id DESC` y calcula el total con `count(*) OVER ()`;
+   2. ordena por `ts_rank DESC, created_at DESC, id DESC` y aplica `LIMIT/OFFSET`; en paralelo, cuenta las coincidencias con un tope de 1 000 (`totalCapped`);
    3. aplica `LIMIT/OFFSET`;
    4. **solo para las filas de la página** calcula `ts_headline` del título y del contenido.
 3. Los marcadores de `ts_headline` (caracteres de control) se convierten en segmentos `{ text, match }`.
@@ -189,9 +189,9 @@ El enunciado define el actor de HU-01 como "Administrador / Desarrollador" y el 
 | Decisión | Alternativa | Motivo |
 |---|---|---|
 | `websearch_to_tsquery('simple', $1)` | `to_tsquery`, `plainto_tsquery` | Acepta texto de usuario **sin errores de sintaxis** y admite `"frase exacta"`, `OR` y `-exclusión`. `to_tsquery` falla ante entradas como `a & \|`; `plainto_tsquery` no admite frases ni operadores |
-| Relevancia con `ts_rank_cd` (*cover density*) | `ts_rank` | Además de la frecuencia y los pesos A/B/C, premia que los términos aparezcan cerca entre sí. Verificado: un documento con el término en el título queda por encima de otro que solo lo tiene en el contenido |
+| Relevancia con `ts_rank` (pesos A/B/C) | `ts_rank_cd` (*cover density*) | Ambas respetan los pesos (título > metadatos > contenido), y se verificó que un término en el título queda por encima de uno solo en el contenido. `ts_rank_cd` además premia la cercanía entre términos, pero **costaba un 65 % más** (650 ms frente a 395 ms al puntuar 10 000 coincidencias) y no cumplía el objetivo de latencia. La cercanía de las frases ya la exige `"…"` en el filtro. Era la decisión inicial; se cambió por la medición |
 | Orden `rank DESC, created_at DESC, id DESC` | Solo `rank` | A igual relevancia el orden queda indefinido y una fila podría repetirse o desaparecer entre páginas. Con el desempate por `id` es total y estable (verificado: 25 resultados en 3 páginas sin solapes) |
-| `count(*) OVER ()` en la misma consulta | Una segunda consulta `COUNT` | Un solo viaje a la base de datos. Si la página está fuera de rango, se cuenta aparte para devolver el total real |
+| Total con **tope** (`LIMIT 1001` en una consulta aparte, en paralelo) → `totalCapped` y "más de 1 000 resultados" | `count(*) OVER ()` en la misma consulta (decisión inicial) | `count(*) OVER ()` obligaba a una agregación de ventana sobre todas las coincidencias en un solo proceso. El conteo con tope se detiene al llegar al límite (19 ms frente a ~180 ms) y es lo habitual en buscadores. Configurable con `SEARCH_COUNT_CAP` |
 | `ts_headline` **solo para las filas de la página** (CTE) | Para todas las coincidencias | `ts_headline` vuelve a analizar el texto y es lo más caro de la consulta. Calcularlo para 10 filas en vez de miles mantiene la latencia acotada |
 | `ts_headline` sobre los primeros **50 000 caracteres** | El texto completo | Acota el coste por fila en documentos de varios MB. Límite: una coincidencia más allá encuentra el documento (el filtro usa el índice completo), pero su fragmento muestra el inicio sin resaltar |
 | **Marcadores de control** (`\u0002`/`\u0003`) → segmentos `{ text, match }` | `<b>…</b>` de `ts_headline` insertado como HTML | **Comprobado en psql: `ts_headline` no escapa HTML.** Devuelve `<img src=x onerror=alert(2)>` tal cual e incluso puede cortar una etiqueta a la mitad. Insertarlo con `innerHTML` sería XSS. Con segmentos, el cliente pinta `<mark>` como nodos de texto |
@@ -211,9 +211,56 @@ El enunciado define el actor de HU-01 como "Administrador / Desarrollador" y el 
 | Ruta física nunca expuesta; archivo resuelto por `id` → `storage_path` | Sin *path traversal*: el cliente nunca indica una ruta |
 - Índice `(created_at DESC, id DESC)` para listados y como desempate estable de la paginación.
 
-### Latencia objetivo (400–1000 ms) *(pendiente)*
+### Latencia: medición y optimización
 
-El objetivo se interpreta como un máximo de 1 s: una respuesta más rápida cumple, y no se añade ningún retardo artificial. Se medirá la latencia HTTP de extremo a extremo (promedio y p95) con un volumen de datos representativo, junto con `EXPLAIN (ANALYZE, BUFFERS)`.
+**Objetivo:** el enunciado pide respuestas "entre 400 ms y 1 s". Se interpreta como un **máximo de 1 s**: una respuesta más rápida cumple, y no se añade ningún retardo artificial.
+
+**Método** (reproducible: `npm run seed` + `npm run benchmark`; informe completo en [benchmark.md](benchmark.md)):
+- 10 000 documentos sintéticos (175 MB de texto, 2–200 KB cada uno, vocabulario técnico con distribución de Zipf), indexados **por el pipeline real**: 46 s, 216 documentos/s con 4 en paralelo y 0 errores.
+- Latencia **HTTP de extremo a extremo** (p50/p95/máx, 30 mediciones tras calentar) frente al tiempo de base de datos (`Server-Timing`).
+- Consultas: término frecuente (en el 100 % de los documentos, el peor caso), dos términos, frase, selectiva, OR, exclusión, sin resultados y página 50; además 10 clientes concurrentes.
+- `EXPLAIN (ANALYZE, BUFFERS)` de la consulta **exacta** de la API.
+
+**Primera medición: fuera del objetivo en las consultas amplias.**
+
+| Caso | p95 antes | p95 después |
+|---|---|---|
+| Término frecuente | 772 ms | **277 ms** |
+| Dos términos | 1 199 ms | **418 ms** |
+| Frase exacta | 1 243 ms | **462 ms** |
+| OR | 842 ms | **294 ms** |
+| Página 50 | 545 ms | **343 ms** |
+| Selectiva / sin resultados | 4 / 3 ms | 5 / 3 ms |
+| **10 clientes concurrentes** | **2 078 ms** | **778 ms** |
+| Rendimiento con 10 clientes | 11 búsquedas/s | **26 búsquedas/s** |
+
+Antes y después se midieron con la misma base, el mismo corpus y el mismo script, tras `VACUUM ANALYZE`.
+
+**Diagnóstico** (plan de ejecución y tiempos aislados en psql):
+
+| Paso, término presente en los 10 000 documentos | Tiempo |
+|---|---|
+| El índice GIN encuentra las coincidencias | 0,6 ms |
+| Puntuar **todas** las coincidencias con `ts_rank_cd` (leer 63 MB de vectores TOAST y calcular) | ≈ 650 ms |
+| …con `ts_rank` | ≈ 395 ms |
+| Leer los vectores sin puntuar | ≈ 360 ms |
+| `count(*) OVER ()`: agregación de ventana sobre todas las coincidencias, en un proceso | Impedía el *top-N* directo |
+
+Encontrar coincidencias es casi gratis gracias al índice. El coste está en **ordenar por relevancia**, porque hay que puntuar cada coincidencia para quedarse con 10.
+
+**Cambios aplicados:**
+1. `ts_rank` en lugar de `ts_rank_cd` (ver la tabla de decisiones de búsqueda).
+2. Total en una consulta aparte con **tope de 1 000**, ejecutada en paralelo con la página (`totalCapped` → "más de 1 000 resultados").
+
+**Experimentos descartados** (medidos y revertidos):
+
+| Idea | Resultado | Por qué no |
+|---|---|---|
+| Columna `rank_vector` reducida (título + metadatos + 4 KB de contenido) para puntuar | 560 ms (≈ −14 %) | Sigue ocupando más de lo que cabe en la fila (TOAST); poca ganancia para una columna y una migración más |
+| Compresión `lz4` en `search_vector` y `extracted_text` | 750–880 ms (**peor**) | Los vectores no estaban comprimidos (`pglz` no compensa en ellos). El coste es leer y puntuar, no descomprimir |
+| Paralelizar el ranking | No se activó | El planificador ve la tabla principal pequeña (6 MB); el coste real está en TOAST, fuera de su modelo |
+
+**Límites:** medido en local, sin latencia de red, con PostgreSQL sin ajustar y un corpus sintético. El coste de las consultas amplias crece con el **número de coincidencias**. Ver "4. Escalabilidad".
 
 ### Frontend
 
@@ -297,12 +344,35 @@ sequenceDiagram
 
 **Limitación conocida:** si Redis falla mientras el cliente sigue conectado, ese cliente no ve el cambio hasta que se reconecta (no hay re-snapshot periódico). PostgreSQL mantiene el estado correcto y `GET /api/documents/:id/status` lo devuelve.
 
-## 4. Escalabilidad *(pendiente de completar)*
+## 4. Escalabilidad
 
-- La API no guarda estado entre peticiones (JWT, archivos en almacenamiento compartido), así que admite réplicas detrás de un balanceador.
-- Los workers escalan de forma horizontal sobre la misma cola.
-- El índice GIN crece con el número de lexemas distintos, no de forma lineal con las filas, y la búsqueda está paginada.
-- Evolución posible: almacenamiento de objetos para los originales, particionado de la tabla o un motor de búsqueda dedicado si las mediciones lo justifican.
+¿Cómo responde la arquitectura a un incremento masivo de documentos? Por componente, de lo ya preparado a lo que habría que cambiar.
+
+### Ya preparado
+
+| Componente | Cómo escala | Por qué funciona |
+|---|---|---|
+| **API** | Réplicas detrás de un balanceador | No guarda estado entre peticiones: JWT sin sesión en servidor, archivos en un almacenamiento común y eventos vía Redis Pub/Sub, que llegan a todas las réplicas |
+| **Indexación** | Más procesos worker sobre la misma cola, o más `INDEXING_CONCURRENCY` | La cola reparte los trabajos; la idempotencia (`jobId`, `WHERE status = 'PROCESANDO'`) hace segura la concurrencia. Medido: 216 documentos/s con un worker y concurrencia 4 |
+| **Carga de picos** | La cola absorbe ráfagas | La API responde `PROCESANDO` al instante aunque haya miles de documentos esperando |
+| **Búsqueda selectiva** | Casi constante | El GIN localiza un término raro en milisegundos con independencia del tamaño de la tabla (medido: 4 ms con 10 000 documentos) |
+| **Tiempo real** | Una suscripción Redis por réplica | N pestañas abiertas no multiplican las conexiones a Redis |
+
+### Dónde aparece el límite: consultas amplias
+
+El coste de ordenar por relevancia crece con el **número de coincidencias**, no con el tamaño total: `ts_rank` puntúa cada coincidencia para quedarse con 10. Con 10 000 documentos, un término presente en todos tarda unos 277 ms (p95). Con un crecimiento de 10×, ese caso crecería de forma aproximadamente lineal y superaría el segundo. Opciones, de menor a mayor cambio:
+
+1. **Ajustar PostgreSQL:** `shared_buffers`, `work_mem` y paralelismo forzado por tabla (`parallel_workers`). Sin cambios de código.
+2. **Réplicas de lectura de PostgreSQL** para repartir las búsquedas. La API ya separa lecturas y escrituras por módulo.
+3. **Puntuar un subconjunto acotado** cuando el término es muy frecuente (relevancia aproximada para consultas genéricas), o usar la extensión **RUM**, que guarda posiciones en el índice y ordena por relevancia sin leer los vectores. Requiere una imagen de PostgreSQL con la extensión.
+4. **Motor dedicado** (Elasticsearch/OpenSearch), con *top-k* eficiente (BM25 + WAND), réplicas y *sharding*. El cambio sería localizado: el worker publicaría también en el motor, y `SearchService` cambiaría su implementación. El precio es un segundo sistema que sincronizar y operar.
+
+### Otros límites al crecer
+
+- **Almacenamiento de originales:** `STORAGE_DIR` local. Con varias réplicas o mucho volumen, almacenamiento de objetos (S3 o compatible). `storage_path` es relativo, así que no hay que reescribir filas.
+- **Tamaño de la tabla:** particionar `documents` (por fecha o categoría) mantiene los índices y el `VACUUM` manejables.
+- **Paginación profunda:** `OFFSET` está acotado (página ≤ 1 000) y el total se cuenta con tope, así que una consulta amplia nunca recorre todo solo para contar.
+- **Mantenimiento del índice:** las cargas masivas acumulan entradas en la lista pendiente del GIN (*fastupdate*). El autovacuum la vacía; en cargas masivas conviene un `VACUUM ANALYZE` al terminar (observado en la medición: el índice pasó de 8,6 a 4,3 MB y las estadísticas cambiaron los planes).
 
 ## 5. Desviaciones respecto a la estructura de referencia
 
@@ -320,7 +390,8 @@ sequenceDiagram
 - Sin OCR: un PDF escaneado solo se encuentra por título y metadatos (`content_indexed = false`).
 - Los fragmentos resaltados solo cubren los primeros 50 000 caracteres de cada documento.
 - Sin *stemming* (diccionario `simple`): no hay coincidencia entre singular y plural.
-- La latencia de búsqueda todavía no se ha medido con un volumen representativo (pendiente de la etapa de medición).
+- Latencia medida en local con 10 000 documentos sintéticos (ver [benchmark.md](benchmark.md)): las consultas amplias crecen con el número de coincidencias (ver "4. Escalabilidad").
+- El total de resultados se cuenta con un tope de 1 000 ("más de 1 000 resultados").
 - SSE: un evento publicado mientras Redis está caído y el cliente sigue conectado no llega hasta la siguiente reconexión de ese cliente.
 - La reconciliación de documentos atascados ocurre solo al arrancar el worker, no de forma periódica.
 - No se ha probado la carga con Redis caído. Por diseño, el documento queda registrado y se recupera con la reconciliación, pero no se ha medido cuánto tarda en responder `queue.add` mientras Redis no está disponible.

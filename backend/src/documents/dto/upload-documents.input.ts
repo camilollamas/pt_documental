@@ -5,9 +5,21 @@ import {
   ArrayMinSize,
   IsNotEmpty,
   IsString,
+  Matches,
   MaxLength,
   ValidateNested,
 } from 'class-validator';
+
+/**
+ * U+FFFD (�) es el carácter de reemplazo: aparece cuando el texto llegó en otra codificación (p. ej.
+ * curl en Windows con argumentos en la página de códigos del sistema). Se rechaza para no guardar texto dañado.
+ */
+const NO_REPLACEMENT_CHAR = /^[^\uFFFD]*$/;
+const utf8 = (each = false) =>
+  Matches(NO_REPLACEMENT_CHAR, {
+    each,
+    message: '$property contiene caracteres dañados (�): envíe el texto codificado en UTF-8',
+  });
 
 const trim = () =>
   Transform(({ value }) => (typeof value === 'string' ? value.trim() : value));
@@ -18,6 +30,7 @@ export class DocumentMetadataInput {
   @trim()
   @IsString()
   @IsNotEmpty()
+  @utf8()
   @MaxLength(200)
   title: string;
 
@@ -25,6 +38,7 @@ export class DocumentMetadataInput {
   @trim()
   @IsString()
   @IsNotEmpty()
+  @utf8()
   @MaxLength(120)
   author: string;
 
@@ -32,6 +46,7 @@ export class DocumentMetadataInput {
   @trim()
   @IsString()
   @IsNotEmpty()
+  @utf8()
   @MaxLength(80)
   category: string;
 
@@ -44,12 +59,14 @@ export class DocumentMetadataInput {
   @ArrayMaxSize(20)
   @IsString({ each: true })
   @MaxLength(40, { each: true })
+  @utf8(true)
   tags: string[];
 
   @Field()
   @trim()
   @IsString()
   @IsNotEmpty()
+  @utf8()
   @MaxLength(20)
   version: string;
 }

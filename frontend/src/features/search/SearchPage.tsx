@@ -8,6 +8,7 @@ import { inputClass } from '../../components/Field';
 import { Highlight } from '../../components/Highlight';
 import { formatDate, formatVersion } from '../../lib/format';
 import { searchDocuments, type SearchResponse } from '../../services/api';
+import { totalLabel } from './page-window';
 import { Pagination } from './Pagination';
 
 type Outcome = { key: string } & ({ kind: 'error'; message: string } | { kind: 'done'; result: SearchResponse });
@@ -86,7 +87,7 @@ export function SearchPage() {
 
       {/* Anuncia el resultado de cada búsqueda a los lectores de pantalla. */}
       <p aria-live="polite" className="sr-only">
-        {state.kind === 'done' && `${state.result.total} ${state.result.total === 1 ? 'resultado' : 'resultados'}`}
+        {state.kind === 'done' && totalLabel(state.result.total, state.result.totalCapped)}
       </p>
 
       {state.kind === 'error' && <Alert tone="error" title="No se pudo completar la búsqueda">{state.message}</Alert>}
@@ -139,7 +140,7 @@ export function SearchPage() {
               </li>
             ))}
           </ol>
-          <Pagination page={state.result.page} pageSize={state.result.pageSize} total={state.result.total} hrefFor={hrefFor} />
+          <Pagination page={state.result.page} pageSize={state.result.pageSize} total={state.result.total} totalCapped={state.result.totalCapped} hrefFor={hrefFor} />
         </div>
       )}
     </section>

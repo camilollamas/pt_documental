@@ -21,7 +21,9 @@
     "test:cov": "vitest run --coverage",
     "test:debug": "vitest --inspect-brk --no-file-parallelism",
     "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
-    "hash-password": "node --disable-warning=ExperimentalWarning scripts/hash-password.ts"
+    "hash-password": "node --disable-warning=ExperimentalWarning scripts/hash-password.ts",
+    "seed": "node --disable-warning=ExperimentalWarning scripts/seed.ts",
+    "benchmark": "node --disable-warning=ExperimentalWarning scripts/benchmark.ts"
   },
   "dependencies": {
     "@apollo/server": "^5.5.1",
@@ -55,6 +57,7 @@
     "@types/express": "^5.0.0",
     "@types/graphql-upload": "^17.0.0",
     "@types/node": "^24.0.0",
+    "@types/pg": "^8.23.1",
     "@types/supertest": "^7.0.0",
     "@vitest/coverage-v8": "^4.1.2",
     "oxlint": "^1.58.0",

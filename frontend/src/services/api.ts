@@ -21,7 +21,8 @@ export type SearchItem = {
   indexedAt: string;
 };
 
-export type SearchResponse = { items: SearchItem[]; total: number; page: number; pageSize: number };
+/** `totalCapped`: hay más coincidencias que `total` (la API cuenta con tope para no recorrerlas todas). */
+export type SearchResponse = { items: SearchItem[]; total: number; totalCapped: boolean; page: number; pageSize: number };
 
 export type DocumentDetail = {
   id: string;

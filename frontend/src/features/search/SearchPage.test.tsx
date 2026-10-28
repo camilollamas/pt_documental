@@ -75,6 +75,15 @@ describe('Buscar', () => {
     expect(within(nav).getByRole('link', { name: 'Página siguiente' })).toHaveAttribute('href', '/buscar?q=guardia&page=3');
   });
 
+  it('indica "más de N resultados" cuando la API cuenta con tope', async () => {
+    mockFetch(searchRoute({ items: [item()], total: 1000, totalCapped: true, page: 1, pageSize: 10 }));
+    renderApp('/buscar?q=kubernetes');
+
+    const nav = await screen.findByRole('navigation', { name: 'Paginación de resultados' });
+    expect(within(nav).getByText('1–10 de más de 1000 resultados')).toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: '100' })).toBeInTheDocument();
+  });
+
   it('muestra un error legible si la búsqueda falla', async () => {
     mockFetch(searchRoute({ statusCode: 500 }, 500));
     renderApp('/buscar?q=algo');

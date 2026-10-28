@@ -149,6 +149,21 @@ describe('Búsqueda, detalle y original', () => {
       expect(beyond.body).toMatchObject({ items: [], total: 25, page: 9 });
     });
 
+    it('limita el conteo con un tope y lo indica (totalCapped), sin cambiar los resultados', async () => {
+      for (let i = 0; i < 25; i++) await seed({ title: `Nota ${i}`, content: 'alarma de disco' });
+      try {
+        process.env.SEARCH_COUNT_CAP = '20';
+        const capped = await search('alarma', { pageSize: 10 });
+        expect(capped.body).toMatchObject({ total: 20, totalCapped: true });
+        expect(capped.body.items).toHaveLength(10);
+
+        process.env.SEARCH_COUNT_CAP = '100';
+        expect((await search('alarma')).body).toMatchObject({ total: 25, totalCapped: false });
+      } finally {
+        delete process.env.SEARCH_COUNT_CAP;
+      }
+    });
+
     it('responde vacío, sin error, a búsquedas vacías, sin resultados o solo con signos', async () => {
       await seed({ title: 'Algo', content: 'texto' });
       for (const query of ['', '   ', 'inexistentexyz', '!!! ???', '&|:*']) {

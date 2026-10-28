@@ -18,6 +18,7 @@ export function appConfig() {
     adminPasswordHash: process.env.ADMIN_PASSWORD_HASH ?? '',
     jwtSecret: process.env.JWT_SECRET ?? '',
     jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '8h',
+    searchCountCap: Number(process.env.SEARCH_COUNT_CAP ?? 1000),
     loginMaxAttemptsPerMinute: Number(process.env.LOGIN_MAX_ATTEMPTS_PER_MINUTE ?? 5),
   };
 }

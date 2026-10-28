@@ -1,11 +1,11 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Link } from 'react-router';
 import { buttonClass } from '../../components/button-class';
-import { pageWindow } from './page-window';
+import { pageWindow, totalLabel } from './page-window';
 
-type Props = { page: number; pageSize: number; total: number; hrefFor: (page: number) => string };
+type Props = { page: number; pageSize: number; total: number; totalCapped?: boolean; hrefFor: (page: number) => string };
 
-export function Pagination({ page, pageSize, total, hrefFor }: Props) {
+export function Pagination({ page, pageSize, total, totalCapped = false, hrefFor }: Props) {
   const pages = Math.ceil(total / pageSize);
   const from = (page - 1) * pageSize + 1;
   const to = Math.min(page * pageSize, total);
@@ -16,7 +16,7 @@ export function Pagination({ page, pageSize, total, hrefFor }: Props) {
   return (
     <nav aria-label="Paginación de resultados" className="flex flex-wrap items-center justify-between gap-3">
       <span className="font-mono text-[13px] leading-5 tabular-nums">
-        {from}–{to} de {total} {total === 1 ? 'resultado' : 'resultados'}
+        {from}–{to} de {totalLabel(total, totalCapped)}
       </span>
       {pages > 1 && (
         <ol className="flex gap-1">

@@ -127,6 +127,15 @@ describe('Carga de documentos (GraphQL multipart)', () => {
     expect(res.body.data).toBeNull();
   });
 
+  it('rechaza metadatos con texto dañado por otra codificación (�) y acepta tildes y la letra F', async () => {
+    const damaged = await upload([txt], [{ ...metadata('x'), title: 'Gu�a de instalaci�n' }]);
+    expect(damaged.body.errors?.[0].extensions.code).toBe('BAD_REQUEST');
+    expect(JSON.stringify(damaged.body.errors)).toMatch(/UTF-8/);
+
+    const accented = await upload([txt], [{ ...metadata('x'), title: 'Guía FAQ de instalación', tags: ['ñandú', 'DFS'] }]);
+    expect(accented.body.data.uploadDocuments[0].status).toBe('PROCESANDO');
+  });
+
   it('exige el mismo número de archivos y metadatos', async () => {
     const res = await upload([txt, md], [metadata('solo uno')]);
     expect(res.body.errors?.[0].message).toMatch(/deben coincidir/);
