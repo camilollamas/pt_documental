@@ -55,6 +55,10 @@ export class DocumentEntity {
   @Column('tsvector', { name: 'search_vector', nullable: true, select: false })
   searchVector: string | null;
 
+  /** false en un documento INDEXADO = solo se puede encontrar por título y metadatos. */
+  @Column('boolean', { name: 'content_indexed', default: false })
+  contentIndexed: boolean;
+
   @Column('text', { name: 'error_message', nullable: true })
   errorMessage: string | null;
 

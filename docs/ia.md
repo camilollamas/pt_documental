@@ -34,6 +34,7 @@ Solo con el visto bueno del desarrollador se pasa al siguiente bloque.
 | Bloque 2a: persistencia | Fija la política de credenciales (hash en el entorno, nunca en claro), la duración del token (8 h, sin refresh) y el puerto de PostgreSQL. Exige que la migración SQL venga **explicada línea por línea** para poder defenderla. Reubica `.env.example` en `backend/` | Genera `docker-compose.yml`, la migración (índice GIN, `CHECK` de estados), la entidad y las pruebas contra PostgreSQL real |
 | Auditoría de estructura | Pide una **auditoría** del repositorio contra el punto 5 del enunciado. Crea el repositorio remoto y ordena adelantar la documentación obligatoria | Contrasta la estructura, detecta la documentación faltante, el `.gitignore` sin versionar y un mensaje de commit truncado, y propone correcciones |
 | Bloque 2b: login del administrador | Valida el diseño de autenticación. Decide **no reescribir** el historial de Git, priorizando avanzar | Genera el módulo de autenticación, el script de hash y las pruebas. Detecta que el guard actúa después de recibir los archivos y añade un middleware previo |
+| Bloque 2c: cola e indexación | Ejecuta las pruebas e2e del bloque anterior y aporta la evidencia antes de autorizar el avance. **Decide el tratamiento de los documentos sin texto extraíble** (PDF escaneado): rechaza dejarlos en `ERROR`, que era la propuesta inicial, y pide indexarlos por metadatos **marcados** para poder identificarlos. Ese cambio introdujo la segunda migración (`content_indexed`). Se le ofreció escribir la prueba "PDF dañado → `ERROR` sin detener el worker" y delegó su redacción en la IA | Genera la cola BullMQ, el worker separado, la extracción con `unpdf` y la indexación con pesos A/B/C. Detecta y corrige dos fallos propios: la concurrencia leída antes de cargar `.env` y un log de "indexado" que no comprobaba las filas afectadas. Verifica el límite de 1 MB del `tsvector` en PostgreSQL antes de documentarlo. Escribe, a petición del desarrollador, la prueba del PDF dañado dentro de un lote con un documento válido |
 
 ## 3. Prompts clave y cómo se refinaron
 
@@ -83,10 +84,15 @@ Los prompts se muestran resumidos y con la redacción limpiada; el sentido es el
 - El valor de ejemplo de `JWT_SECRET` en `.env.example` habría superado la validación de longitud y permitido arrancar con un secreto público. Ahora se deja vacío.
 - Dos afirmaciones de la documentación técnica no estaban comprobadas y se matizaron para que solo digan lo verificado.
 - Una prueba manual dejó una fila en la base de datos de la demo, y se eliminó.
+- La concurrencia del worker se leía en un decorador, que se evalúa antes de cargar `.env`, así que el valor configurado se ignoraba. Ahora se fija al arrancar.
+- El worker registraba "indexado" aunque el `UPDATE` no afectara ninguna fila. Ahora comprueba el número de filas afectadas.
+- Una limitación documentada sobre Redis caído no estaba comprobada y se reformuló para que solo diga lo verificado.
+- La IA filtraba la salida de las pruebas para mostrar solo los totales, y eso ocultaba un aviso de la consola. Lo detectó el desarrollador al ejecutar las pruebas por su cuenta.
 
 ### Verificaciones ejecutadas por el desarrollador
 *(Registrar aquí las verificaciones que el desarrollador ejecute personalmente: comando, fecha y resultado.)*
 
 | Fecha | Verificación | Resultado |
 |---|---|---|
-| | | |
+| 2026-10-28 09:22 | `npm run test:e2e` (backend, tras el Bloque 2b): login, tokens, límite de intentos, carga multipart y restricciones de la base | ✅ 2 archivos, 17/17 pruebas (`auth.e2e-spec.ts` 9, `upload.e2e-spec.ts` 8) en 12,8 s |
+| 2026-10-28 09:47 | `vitest run test/indexing.e2e-spec.ts` (Bloque 2c): pesos A/B/C en TXT/MD/PDF, errores definitivos, límite del `tsvector`, idempotencia y reconciliación | ✅ 6/6 + 1 pendiente (PDF dañado). **Detectó en la salida un aviso `WARN [DataSourceNameRegistry]`** que la IA había pasado por alto al filtrar los resultados. Analizado: es esperado en la prueba (API y worker en el mismo proceso, cada uno con su conexión) y no aparece en producción; se documentó en la propia prueba |

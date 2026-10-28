@@ -19,20 +19,20 @@ flowchart LR
     subgraph Datos
         PG[("PostgreSQL 18<br/>documents + GIN ✅")]
         FS[("STORAGE_DIR<br/>originales ✅")]
-        RQ[("Redis 8<br/>BullMQ + Pub/Sub")]
+        RQ[("Redis 8<br/>cola BullMQ ✅ · Pub/Sub (pendiente)")]
     end
 
-    W["Worker de indexación<br/>(pendiente)"]
+    W["Worker de indexación ✅<br/>proceso separado"]
 
     UI -- "multipart (archivos + metadatos)" --> GQL
     UI -- "búsqueda / detalle" --> REST
     UI -. "EventSource" .-> SSE
     GQL --> FS
     GQL -- "INSERT PROCESANDO" --> PG
-    GQL -. "encola documentId" .-> RQ
-    RQ -. "trabajo" .-> W
-    W -. "lee original" .-> FS
-    W -. "UPDATE texto + tsvector + INDEXADO/ERROR" .-> PG
+    GQL -- "encola documentId" --> RQ
+    RQ -- "trabajo" --> W
+    W -- "lee original" --> FS
+    W -- "UPDATE texto + tsvector + INDEXADO/ERROR" --> PG
     W -. "publica evento" .-> RQ
     RQ -. "suscripción" .-> SSE
     REST -- "@@ tsquery (FTS)" --> PG
@@ -52,8 +52,10 @@ Líneas continuas: implementado. Líneas punteadas: pendiente.
    2. Se guarda por streaming con un UUID como nombre.
    3. Se verifica que el contenido corresponda a la extensión.
    4. Se inserta la fila `PROCESANDO`.
-7. *(pendiente)* Se encola el `documentId` en BullMQ.
+7. ✅ Se encola el `documentId` en BullMQ (`jobId = documentId`).
 8. ✅ La respuesta devuelve `id` + `PROCESANDO` por archivo, sin esperar a la indexación.
+9. ✅ El worker (proceso separado) toma el trabajo, lee el original, extrae el texto y, en un solo `UPDATE`, guarda el texto y el `search_vector` y cambia el estado a `INDEXADO`. Ante un fallo del propio documento, el estado pasa a `ERROR` con su causa.
+10. *(pendiente)* El worker publica el cambio de estado y la API lo notifica por SSE.
 
 ### Responsabilidad de los módulos
 
@@ -64,7 +66,7 @@ Líneas continuas: implementado. Líneas punteadas: pendiente.
 | `documents/` | Entidad, carga y almacenamiento, validación de archivos, DTOs | ✅ |
 | `graphql/` | Resolvers GraphQL (`uploadDocuments`, `uploadLimits`) | ✅ |
 | `auth/` | Login del administrador, emisión y verificación de JWT, guard GraphQL, límite de intentos | ✅ |
-| `indexing/` | Cola BullMQ, worker y extractores TXT/MD/PDF | ⏳ |
+| `indexing/` | Cola BullMQ, worker (`worker.ts`), extracción TXT/MD/PDF, construcción del `tsvector`, reintentos y reconciliación | ✅ |
 | `search/` | Consultas FTS parametrizadas, ranking y resaltado | ⏳ |
 | `events/` | Redis Pub/Sub → SSE | ⏳ |
 
@@ -80,7 +82,7 @@ Líneas continuas: implementado. Líneas punteadas: pendiente.
 | **GraphQL multipart para la carga** | REST multipart | Aclaración posterior al enunciado. Una sola mutación tipada recibe archivos y metadatos |
 | **PostgreSQL FTS** (`tsvector` + GIN) | Elasticsearch, OpenSearch, Meilisearch | Datos e índice en una sola tecnología: sin sincronización entre sistemas y sin un servicio extra que operar. Un motor dedicado se justificaría si las mediciones o el volumen lo exigen |
 | **TypeORM** | SQL puro, Prisma | Repositorios y migraciones integrados con Nest. El SQL crítico (esquema FTS, consultas de búsqueda) se escribe a mano y parametrizado, sin depender de las abstracciones del ORM |
-| **BullMQ + Redis** *(pendiente)* | Procesar dentro de la petición | La extracción de PDF puede tardar; la cola desacopla la respuesta, da reintentos y permite escalar workers |
+| **BullMQ + Redis** | Procesar dentro de la petición; cola en PostgreSQL (`SKIP LOCKED`) | La extracción de PDF puede tardar; la cola desacopla la respuesta, da reintentos y permite escalar workers |
 | **SSE** *(pendiente)* | WebSocket, suscripciones GraphQL | Solo se necesita comunicación servidor → cliente. SSE funciona sobre HTTP con reconexión nativa y sin protocolo adicional |
 | **Vitest + Supertest** | Jest | Es el runner que genera el CLI de Nest 12; el mismo runner se usará en el frontend |
 
@@ -137,16 +139,38 @@ El enunciado define el actor de HU-01 como "Administrador / Desarrollador" y el 
 | `tags TEXT[]` | Las etiquetas solo se muestran e indexan; un arreglo evita un JOIN con una tabla N:M |
 | `status TEXT` + `CHECK (PROCESANDO, INDEXADO, ERROR)` | Estados del enunciado impuestos por la base de datos. Un `CHECK` es más fácil de evolucionar que un `ENUM` de Postgres |
 | `CHECK (status <> 'INDEXADO' OR search_vector IS NOT NULL AND indexed_at IS NOT NULL)` | La base de datos impide marcar un documento como INDEXADO sin su índice |
+| `content_indexed BOOLEAN` + `CHECK (NOT content_indexed OR extracted_text IS NOT NULL)`, en una **segunda migración** (`AddContentIndexed`) | Distingue los documentos indexados con contenido de los indexados solo por metadatos. Se añadió con una migración nueva, sin editar la anterior, como se haría con datos en producción. `down()` verificado: revertir y volver a aplicar |
 | `storage_path` relativo a `STORAGE_DIR` | Permite mover el almacenamiento (o pasarlo a almacenamiento de objetos) sin reescribir filas |
 | `search_vector` lo escribe el worker, no una columna generada | `array_to_string` no es `IMMUTABLE` (comprobado: `provolatile = s`). Además, un solo `UPDATE` hace atómica la transición a INDEXADO |
 | SQL escrito a mano; `synchronize: false` | El esquema de búsqueda debe ser explícito y revisable |
 | `migrationsRun: true` | La API migra al arrancar. Para varias réplicas pasaría a un paso del despliegue |
 
+### Indexación: cola, concurrencia, reintentos e idempotencia
+
+| Decisión | Alternativa | Motivo |
+|---|---|---|
+| **Worker en proceso separado** (`dist/worker.js`) | Procesar en la API | La extracción de PDF consume CPU y bloquearía el event loop de la API. Además, el worker escala de forma independiente (más réplicas) |
+| `jobId = documentId` | Id aleatorio | Encolar dos veces el mismo documento no crea dos trabajos |
+| `UPDATE … WHERE status = 'PROCESANDO'` en indexación y en error | Actualizar sin condición | **Idempotencia**: un reintento, un trabajo duplicado o dos workers con el mismo documento nunca reindexan ni pisan un estado final. Probado: reprocesar un documento `INDEXADO` lo deja igual |
+| Un solo `UPDATE` con texto, `search_vector`, estado e `indexed_at` | Varios pasos | Transición atómica: nunca hay un `INDEXADO` sin índice (además lo garantiza el `CHECK` de la tabla) |
+| **Errores definitivos** (PDF dañado o protegido, archivo inexistente, `tsvector` de más de 1 MB) → `ERROR` sin reintentar | Reintentar todo | Reintentar un PDF dañado da el mismo resultado; solo retrasa el aviso al usuario |
+| **Sin texto extraíble** (PDF escaneado, archivo en blanco) → `INDEXADO` solo por título y metadatos, con `content_indexed = false` (*decisión del propietario*) | `ERROR`; OCR | El documento sigue siendo útil y localizable por sus metadatos, y la marca permite identificarlo y avisarlo en la interfaz. OCR (p. ej. Tesseract) queda fuera del alcance |
+| **Errores transitorios** (BD o Redis caídos) → 3 intentos con espera exponencial (2 s, 4 s); agotados → `ERROR` | Sin reintentos | Una caída breve no debe marcar documentos válidos como erróneos |
+| **Reconciliación** al arrancar el worker: reencola los `PROCESANDO` | Aceptar documentos atascados | Si Redis falla justo después del INSERT, la API registra el error, responde `PROCESANDO` y el documento se recupera al reiniciar el worker. Límite: no es periódica; con un `JobScheduler` de BullMQ lo sería |
+| Concurrencia configurable (`INDEXING_CONCURRENCY`, por defecto 2) | Fija | Ajustable según la CPU disponible; se aplica en tiempo de ejecución (el decorador se evaluaría antes de cargar `.env`) |
+| Redis con AOF y `noeviction` | Configuración por defecto | Los trabajos sobreviven a un reinicio de Redis y nunca se descartan por memoria |
+| **`unpdf`** para PDF | `pdf-parse`, `pdfjs-dist` | Sin dependencias (trae pdfjs empaquetado). `pdf-parse` 2.x arrastra un binario nativo (`@napi-rs/canvas`) |
+| Markdown indexado en bruto | Convertirlo a texto plano | El parser de PostgreSQL ya descarta `#`, `*` y `>` al construir el `tsvector`; convertirlo añadiría dependencias sin cambiar el índice |
+| Se eliminan los caracteres NUL del texto extraído | — | PostgreSQL no admite `\0` en `TEXT`, y algunos PDF lo producen |
+
 ### Diseño del índice full-text
 
 - **Índice GIN** sobre `search_vector`. Es un índice invertido (lexema → filas): `search_vector @@ tsquery` no recorre la tabla, a diferencia de `LIKE '%x%'`. Se prefiere a GiST porque es más rápido en lectura, y aquí se lee mucho más de lo que se escribe.
-- *(pendiente)* Pesos `setweight`: título **A**, metadatos **B**, contenido **C**.
-- *(pendiente)* Diccionario `simple`, consulta `websearch_to_tsquery`, ranking `ts_rank_cd` y fragmentos con `ts_headline`.
+- ✅ **Pesos** con `setweight`: título **A**; autor, categoría, versión y etiquetas **B**; contenido extraído **C**. Verificado en pruebas (`nginx:C` coincide y `nginx:A` no).
+- ✅ **Diccionario `simple`:** normaliza a minúsculas sin stemming ni stopwords. Un corpus técnico mezcla español, inglés y términos propios (`k8s`, `pg_dump`, nombres de API) que un diccionario de idioma podría recortar o descartar. Limitación: "documento" no coincide con "documentos", y las palabras vacías ("de", "la") también se indexan.
+- **Límite de PostgreSQL:** un `tsvector` ocupa como máximo 1 MB (SQLSTATE `54000`). Medido: 10 MB de texto con 20 000 términos distintos se indexan sin problema; unas 300 000 palabras distintas lo superan, y el documento pasa a `ERROR` con su causa.
+- **Sin texto extraíble:** el vector contiene solo los lexemas A y B (título y metadatos), y `content_indexed = false`.
+- *(pendiente)* Consulta con `websearch_to_tsquery`, ranking `ts_rank_cd` y fragmentos con `ts_headline`. Verificado de forma manual: encuentra términos dentro del PDF, la frase exacta `"pg_dump y restauración"` y etiquetas.
 - Índice `(created_at DESC, id DESC)` para listados y como desempate estable de la paginación.
 
 ### Latencia objetivo (400–1000 ms) *(pendiente)*
@@ -180,5 +204,7 @@ Diseño previsto:
 
 - Límite de intentos de login en memoria por instancia (ver modelo de permisos).
 - No hay revocación de tokens antes de su caducidad.
-- No hay indexación todavía: los documentos permanecen en `PROCESANDO`.
+- Sin OCR: un PDF escaneado solo se encuentra por título y metadatos (`content_indexed = false`).
+- La reconciliación de documentos atascados ocurre solo al arrancar el worker, no de forma periódica.
+- No se ha probado la carga con Redis caído. Por diseño, el documento queda registrado y se recupera con la reconciliación, pero no se ha medido cuánto tarda en responder `queue.add` mientras Redis no está disponible.
 - Las migraciones se ejecutan al arrancar la API; no es apto para varias réplicas sin un paso de despliegue dedicado.

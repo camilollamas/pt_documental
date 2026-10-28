@@ -1,4 +1,6 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { Queue } from 'bullmq';
 import { randomUUID } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
 import { mkdir, readFile, rm } from 'node:fs/promises';
@@ -8,6 +10,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import type { FileUpload } from 'graphql-upload/processRequest.mjs';
 import { Repository } from 'typeorm';
 import { appConfig } from '../common/config.js';
+import { INDEXING_QUEUE, IndexingJob } from '../indexing/indexing-queue.module.js';
 import { DocumentStatus } from './document-status.js';
 import { DocumentEntity } from './document.entity.js';
 import { DocumentUploadResult } from './dto/document-upload-result.type.js';
@@ -21,9 +24,13 @@ import {
 
 @Injectable()
 export class DocumentsService {
+  private readonly logger = new Logger(DocumentsService.name);
+
   constructor(
     @InjectRepository(DocumentEntity)
     private readonly documents: Repository<DocumentEntity>,
+    @InjectQueue(INDEXING_QUEUE)
+    private readonly indexingQueue: Queue<IndexingJob>,
   ) {}
 
   async upload(
@@ -109,7 +116,13 @@ export class DocumentsService {
       throw dbError;
     }
 
-    // Bloque 2c: encolar la indexación.
+    try {
+      // jobId = id del documento: encolar dos veces el mismo documento no crea dos trabajos.
+      await this.indexingQueue.add('index', { documentId: id }, { jobId: id });
+    } catch (queueError) {
+      // El registro ya existe en PROCESANDO: el worker lo reencola al arrancar (requeuePending).
+      this.logger.error(`No se pudo encolar ${id}: ${(queueError as Error).message}`);
+    }
     return { filename, id, status: DocumentStatus.PROCESANDO };
   }
 }

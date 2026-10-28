@@ -51,11 +51,16 @@ node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'
                            # → úsalo como JWT_SECRET en .env
 ```
 
+Arranca la API y el worker de indexación en **dos terminales**:
+
 ```bash
-npm run start:dev
+npm run start:dev          # API
+npm run start:worker:dev   # worker: extrae el texto e indexa en segundo plano
 ```
 
-Las **migraciones se aplican solas** al arrancar la API. La API queda en `http://localhost:3000`:
+Las **migraciones se aplican solas** al arrancar la API. El worker, al arrancar, vuelve a encolar los documentos que hayan quedado en `PROCESANDO`.
+
+En producción: `npm run build`, y después `npm run start:prod` y `npm run start:worker`. La API queda en `http://localhost:3000`:
 
 | Ruta | Acceso | Descripción |
 |---|---|---|
@@ -71,7 +76,10 @@ Las **migraciones se aplican solas** al arrancar la API. La API queda en `http:/
 | `PORT` | `3000` | Puerto de la API |
 | `DATABASE_URL` | `postgres://docs:docs_local@localhost:5432/documents` | Conexión a PostgreSQL |
 | `TEST_DATABASE_URL` | `postgres://docs:docs_local@localhost:5432/documents_test` | Base de las pruebas e2e (se vacía en cada prueba) |
-| `STORAGE_DIR` | `./storage` | Carpeta de los archivos originales (ignorada por Git) |
+| `REDIS_URL` | `redis://localhost:6379` | Redis de la cola de indexación |
+| `TEST_REDIS_URL` | `redis://localhost:6379/1` | Base Redis de las pruebas e2e |
+| `INDEXING_CONCURRENCY` | `2` | Documentos indexados en paralelo por worker |
+| `STORAGE_DIR` | `./storage` | Carpeta de los archivos originales (ignorada por Git). La API y el worker deben apuntar a la misma |
 | `MAX_UPLOAD_BYTES` | `10485760` (10 MB) | Tamaño máximo por archivo, inclusivo |
 | `MAX_FILES_PER_UPLOAD` | `10` | Máximo de archivos por lote |
 | `ADMIN_USERNAME` | `admin` | Usuario del administrador único |
@@ -113,6 +121,12 @@ Respuesta inmediata, sin esperar a la indexación:
 ] } }
 ```
 
+Después, el worker extrae el texto y el documento pasa a uno de estos estados:
+- **`INDEXADO`**: ya se puede buscar.
+- **`ERROR`**: con la causa en `error_message` (PDF dañado o protegido, archivo no disponible o demasiado texto para el índice).
+
+Los documentos **sin texto extraíble** (PDF escaneado, archivo en blanco) se indexan igual por título y metadatos y quedan marcados con `content_indexed = false`.
+
 Cada archivo del lote se acepta o se rechaza por separado. Un archivo rechazado trae `id: null` y un `error` legible (formato no admitido, tamaño excedido, contenido que no corresponde a la extensión o archivo vacío).
 
 | Situación | Respuesta |
@@ -136,7 +150,7 @@ Requieren `docker compose up -d`, porque las e2e usan PostgreSQL real.
 ```bash
 cd backend
 npm test            # unitarias
-npm run test:e2e    # integración: login, GraphQL multipart y PostgreSQL
+npm run test:e2e    # integración: login, GraphQL multipart, PostgreSQL, cola y worker
 npm run lint
 ```
 
@@ -150,7 +164,10 @@ npm run lint
 │   │   ├── common/        # configuración y health check
 │   │   ├── database/      # configuración TypeORM y migraciones SQL
 │   │   ├── documents/     # entidad, carga, validación de archivos, DTOs
-│   │   └── graphql/       # resolvers GraphQL
+│   │   ├── graphql/       # resolvers GraphQL
+│   │   ├── indexing/      # cola BullMQ, worker, extracción de texto e indexación
+│   │   ├── main.ts        # entrada de la API
+│   │   └── worker.ts      # entrada del worker
 │   └── test/              # pruebas e2e
 ├── docker/postgres/init/  # script que crea la base de pruebas
 ├── docs/
@@ -166,7 +183,7 @@ npm run lint
 | HU-01 | Carga individual y por lote con metadatos, validaciones y respuesta inmediata `PROCESANDO` | ✅ Implementada |
 | HU-01 | Persistencia en PostgreSQL | ✅ Implementada |
 | HU-01 | Login de administrador para autorizar la carga | ✅ Implementada |
-| HU-01 | Cola de indexación (BullMQ) y extracción de texto | ⏳ Pendiente |
+| HU-01 | Cola de indexación (BullMQ) y extracción de texto TXT/MD/PDF | ✅ Implementada |
 | HU-02 | Búsqueda full-text paginada con resaltado | ⏳ Pendiente |
 | HU-03 | Visor de documentos y detalle | ⏳ Pendiente |
 | HU-04 | Notificaciones en tiempo real (SSE) | ⏳ Pendiente |
@@ -187,5 +204,6 @@ Además de lo que pide el enunciado de la prueba, se aplican estas aclaraciones 
 
 - El límite de intentos de login se cuenta en memoria por instancia. Con varias réplicas habría que guardarlo en Redis.
 - No hay revocación de tokens: un JWT es válido hasta que caduca (8 h). Cambiar `JWT_SECRET` invalida todos.
-- Los documentos quedan en `PROCESANDO` hasta que se implemente el worker de indexación.
-- PDF escaneados sin capa de texto: no se hará OCR (por definir y documentar).
+- **Sin OCR:** un PDF escaneado sin capa de texto se encuentra solo por título y metadatos (`content_indexed = false`).
+- Un documento con demasiadas palabras distintas (más de 1 MB de índice, el límite de PostgreSQL para un `tsvector`) termina en `ERROR`. Un texto técnico realista de 10 MB cabe sin problema.
+- El Markdown se indexa como texto: los símbolos de formato no generan términos de búsqueda.
