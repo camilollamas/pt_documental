@@ -23,7 +23,8 @@ Solo con el visto bueno del desarrollador se pasa al siguiente bloque.
 | Herramienta | Uso |
 |---|---|
 | **Claude Code** (modelo Claude Opus 5.5), extensión de VS Code | Análisis de requisitos, propuesta de plan, generación de código y pruebas, diagnóstico de errores y borradores de documentación |
-| **Context7** (servidor MCP de documentación) | Consulta de la documentación vigente de TypeORM 1.x para no usar APIs obsoletas |
+| **Context7** (servidor MCP de documentación) | Consulta de la documentación vigente de TypeORM 1.x, BullMQ 6 y SSE en NestJS 12 para no usar APIs obsoletas |
+| **Claude Artifacts** (tipo "Design System") | Publicación del sistema de diseño "Cajetín" como referencia navegable de tokens y componentes |
 
 ## 2. Casos de uso por etapa
 
@@ -36,6 +37,8 @@ Solo con el visto bueno del desarrollador se pasa al siguiente bloque.
 | Bloque 2b: login del administrador | Valida el diseño de autenticación. Decide **no reescribir** el historial de Git, priorizando avanzar | Genera el módulo de autenticación, el script de hash y las pruebas. Detecta que el guard actúa después de recibir los archivos y añade un middleware previo |
 | Bloque 2c: cola e indexación | Ejecuta las pruebas e2e del bloque anterior y aporta la evidencia antes de autorizar el avance. **Decide el tratamiento de los documentos sin texto extraíble** (PDF escaneado): rechaza dejarlos en `ERROR`, que era la propuesta inicial, y pide indexarlos por metadatos **marcados** para poder identificarlos. Ese cambio introdujo la segunda migración (`content_indexed`). Se le ofreció escribir la prueba "PDF dañado → `ERROR` sin detener el worker" y delegó su redacción en la IA | Genera la cola BullMQ, el worker separado, la extracción con `unpdf` y la indexación con pesos A/B/C. Detecta y corrige dos fallos propios: la concurrencia leída antes de cargar `.env` y un log de "indexado" que no comprobaba las filas afectadas. Verifica el límite de 1 MB del `tsvector` en PostgreSQL antes de documentarlo. Escribe, a petición del desarrollador, la prueba del PDF dañado dentro de un lote con un documento válido |
 | Bloque 3: búsqueda, detalle y original | Autoriza el bloque | Genera la consulta FTS (`websearch_to_tsquery`, `ts_rank_cd`, `ts_headline` paginado), el resaltado por segmentos, los endpoints de detalle, estado y original, y 19 pruebas e2e. Al verificar en psql descubre que `ts_headline` no escapa HTML, lo que confirma el diseño de segmentos. Una prueba demasiado ingenua (detectaba "LIKE" en un comentario) se corrige, y se comprueba con una mutación que sigue detectando un `ILIKE` real |
+| Sistema de diseño "Cajetín" | Pide establecer un sistema visual con estándares antes del frontend (skill `/design:design-system`). Decide el tratamiento de **usted** en los textos, los iconos Lucide y las familias tipográficas propuestas | Propone la identidad (nombre tomado del recuadro de datos de los planos técnicos), los tokens en tema claro y oscuro, el manual de marca y 13 componentes con vista previa. Comprueba con un script el contraste WCAG de cada par de colores: corrige un borde de control que no llegaba a 3:1 y separa el beige de aviso del amarillo de las coincidencias. Corrige en su propio ejemplo de Tailwind una referencia circular entre tokens |
+| Bloque 5a: frontend (búsqueda, visor, login) | Autoriza el bloque tras confirmar las decisiones del sistema de diseño | Genera el proyecto con el scaffold oficial de Vite, los tokens de Cajetín en Tailwind, los componentes, las pantallas y 28 pruebas. Verifica el stack completo a través del proxy de Vite (login, carga, búsqueda, original y SSE). Corrige varios fallos propios detectados por el linter y las pruebas (ver abajo) |
 | Bloque 4: tiempo real | Autoriza el bloque | Genera la publicación en Redis desde el worker, la suscripción única por instancia y el endpoint SSE con snapshot, filtro por ids y heartbeat, más 9 pruebas e2e con un cliente SSE sobre el protocolo real. Comprueba con una mutación (publicación desactivada) que fallan exactamente las 5 pruebas que dependen de eventos en vivo. Escribe por error una interpolación que habría dejado texto literal en el SQL y la corrige antes de compilar. Reformula una afirmación no comprobada sobre Redis caído |
 
 ## 3. Prompts clave y cómo se refinaron
@@ -92,6 +95,10 @@ Los prompts se muestran resumidos y con la redacción limpiada; el sentido es el
 - La IA filtraba la salida de las pruebas para mostrar solo los totales, y eso ocultaba un aviso de la consola. Lo detectó el desarrollador al ejecutar las pruebas por su cuenta.
 - Dos pruebas de búsqueda partían de supuestos incorrectos: que el fragmento incluiría un texto concreto y que un comentario no contaría como uso de `LIKE`. Se corrigieron tras analizar la salida real de `ts_headline` en psql.
 - Al detener una prueba manual, un proceso de la API quedó vivo unos segundos. Se verificó por puerto y por línea de comandos que no quedara ningún proceso.
+- Frontend: el efecto que devolvía el foco a los resultados dependía de un objeto recreado en cada render y habría robado el foco mientras se escribía. Se corrigió al revisar los avisos del linter.
+- Frontend: una prueba detectó que el cajetín repetía "Indexado" (estado y rótulo de fecha) y que las fechas salían como "28 de oct de 2026" en lugar del formato del sistema de diseño. Se corrigieron ambos y se añadió la prueba de fechas que faltaba.
+- Frontend: un enlace "Volver" usaba un truco de tipos y habría sacado de la aplicación a quien llegara por un enlace directo. Se sustituyó por un enlace a la búsqueda de origen.
+- La primera verificación del stack falló porque otra aplicación de la máquina ocupaba el puerto 3000. Se identificó el proceso sin detenerlo y se documentó cómo usar otro puerto (`API_URL`).
 
 ### Verificaciones ejecutadas por el desarrollador
 *(Registrar aquí las verificaciones que el desarrollador ejecute personalmente: comando, fecha y resultado.)*

@@ -15,8 +15,9 @@ Aplicación web para cargar documentos técnicos (TXT, PDF y Markdown) con metad
 | API de carga | GraphQL (Apollo Server 5) con *multipart request* |
 | Persistencia y búsqueda | PostgreSQL 18 · Full-Text Search (`tsvector` + índice GIN) · TypeORM 1.1 |
 | Cola y eventos | Redis 8 (BullMQ y Pub/Sub) |
-| Pruebas | Vitest + Supertest |
-| Frontend | React + Vite + Tailwind CSS *(pendiente)* |
+| Frontend | React 19 + Vite 8 + Tailwind CSS 4 · React Router 8 · react-markdown · iconos Lucide |
+| Sistema de diseño | [Cajetín](https://claude.ai/artifact/9Wc2oqqftyyNDqfeHxxv1t): tokens claro/oscuro verificados WCAG AA |
+| Pruebas | Vitest + Supertest (backend) · Vitest + Testing Library (frontend) |
 
 ## Requisitos previos
 
@@ -73,6 +74,30 @@ En producción: `npm run build`, y después `npm run start:prod` y `npm run star
 | `GET /api/documents/:id/status` | Público | Estado actual (`PROCESANDO` / `INDEXADO` / `ERROR`) |
 | `GET /api/documents/:id/original` | Público | Archivo original para verlo en el navegador (`?download=1` para descargarlo) |
 | `GET /api/events?ids=` | Público | Flujo SSE de cambios de estado (`INDEXADO` / `ERROR`), sin polling |
+
+### 3. Frontend
+
+```bash
+cd frontend
+npx npm@11 install
+npm run dev                 # http://localhost:5173
+```
+
+Vite reenvía `/api` y `/graphql` a la API (proxy), así que el navegador habla con un solo origen: sin CORS, y el SSE y el token pasan sin configuración extra.
+
+**Si el puerto 3000 está ocupado** por otra aplicación, arranque la API en otro puerto y diga a Vite dónde está:
+
+```bash
+# backend/.env → PORT=3100
+API_URL=http://localhost:3100 npm run dev     # PowerShell: $env:API_URL="http://localhost:3100"; npm run dev
+```
+
+| Pantalla | Ruta | Acceso |
+|---|---|---|
+| Buscar | `/buscar?q=&page=` | Público. La consulta vive en la URL: se puede compartir y recargar |
+| Detalle y visor | `/documentos/:id` | Público. PDF original embebido; Markdown renderizado; TXT preformateado |
+| Iniciar sesión | `/login` | Público (solo existe el administrador) |
+| Cargar | `/cargar` | Administrador; sin sesión redirige al login |
 
 ### Variables de entorno (`backend/.env`)
 
@@ -237,6 +262,11 @@ cd backend
 npm test            # unitarias
 npm run test:e2e    # integración: login, carga, cola y worker, búsqueda, detalle, original y SSE
 npm run lint
+
+cd ../frontend
+npm test            # componentes y pantallas (Testing Library, fetch simulado)
+npm run lint
+npm run build       # comprobación de tipos + build de producción
 ```
 
 ## Estructura
@@ -256,6 +286,16 @@ npm run lint
 │   │   ├── main.ts        # entrada de la API
 │   │   └── worker.ts      # entrada del worker
 │   └── test/              # pruebas e2e
+├── frontend/
+│   └── src/
+│       ├── components/    # Button, Field, Alert, distintivos, Highlight, Layout (Cajetín)
+│       ├── features/
+│       │   ├── auth/      # sesión del administrador, login, ruta protegida
+│       │   ├── documents/ # detalle: cajetín y visor
+│       │   └── search/    # búsqueda y paginación
+│       ├── lib/           # formatos (tamaños, fechas)
+│       ├── services/      # cliente de la API
+│       └── styles/        # tokens del sistema de diseño Cajetín
 ├── docker/postgres/init/  # script que crea la base de pruebas
 ├── docs/
 │   ├── architecture.md
@@ -273,10 +313,12 @@ npm run lint
 | HU-01 | Cola de indexación (BullMQ) y extracción de texto TXT/MD/PDF | ✅ Implementada |
 | HU-02 | Búsqueda full-text paginada con resaltado (API) | ✅ Implementada |
 | HU-03 | Detalle y archivo original para el visor (API) | ✅ Implementada |
-| HU-03 | Visor en la interfaz | ⏳ Pendiente |
+| HU-02 | Búsqueda en la interfaz (resaltado, paginación, URL compartible) | ✅ Implementada |
+| HU-03 | Visor en la interfaz (cajetín, PDF original embebido, Markdown y TXT) | ✅ Implementada |
+| — | Login del administrador en la interfaz | ✅ Implementado |
+| HU-01 | Carga en la interfaz (arrastrar y soltar, metadatos) | ⏳ Pendiente (Bloque 5b) |
 | HU-04 | Notificaciones en tiempo real (SSE + Redis Pub/Sub, sin polling) (API) | ✅ Implementada |
-| HU-04 | Actualización reactiva en la interfaz | ⏳ Pendiente |
-| — | Frontend | ⏳ Pendiente |
+| HU-04 | Actualización reactiva en la interfaz | ⏳ Pendiente (Bloque 5b) |
 | — | Medición de latencia de búsqueda | ⏳ Pendiente |
 
 ## Alcance: enunciado y aclaraciones posteriores

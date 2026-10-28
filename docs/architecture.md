@@ -7,7 +7,7 @@
 ```mermaid
 flowchart LR
     subgraph Cliente
-        UI["Frontend<br/>React + Vite + Tailwind<br/>(pendiente)"]
+        UI["Frontend · React + Vite + Tailwind<br/>búsqueda, visor, login ✅<br/>carga y SSE (pendiente)"]
     end
 
     subgraph API["Backend · NestJS"]
@@ -24,8 +24,8 @@ flowchart LR
 
     W["Worker de indexación ✅<br/>proceso separado"]
 
-    UI -- "multipart (archivos + metadatos)" --> GQL
-    UI -- "búsqueda / detalle" --> REST
+    UI -. "multipart (archivos + metadatos)" .-> GQL
+    UI -- "login / búsqueda / detalle / original" --> REST
     UI -. "EventSource" .-> SSE
     GQL --> FS
     GQL -- "INSERT PROCESANDO" --> PG
@@ -214,6 +214,23 @@ El enunciado define el actor de HU-01 como "Administrador / Desarrollador" y el 
 ### Latencia objetivo (400–1000 ms) *(pendiente)*
 
 El objetivo se interpreta como un máximo de 1 s: una respuesta más rápida cumple, y no se añade ningún retardo artificial. Se medirá la latencia HTTP de extremo a extremo (promedio y p95) con un volumen de datos representativo, junto con `EXPLAIN (ANALYZE, BUFFERS)`.
+
+### Frontend
+
+| Decisión | Alternativa | Motivo |
+|---|---|---|
+| **React + Vite** (SPA) | Next.js | No hace falta SEO ni renderizado en servidor: las vistas dependen de datos de la API. Vite arranca al instante y el build es estático |
+| **Proxy de Vite** (`/api`, `/graphql` → API) | CORS en la API | Un solo origen para el navegador: sin CORS, el `EventSource` y el token funcionan tal cual. En producción, un proxy inverso (nginx) cumple la misma función. El destino es configurable (`API_URL`): en la máquina de desarrollo el puerto 3000 lo ocupaba otra aplicación |
+| **Sistema de diseño Cajetín** → `tokens.css` + Tailwind `@theme inline` | Colores y tamaños sueltos en las clases | Una sola fuente de valores. Ningún componente tiene un hex literal. Contraste WCAG AA verificado por cálculo en claro y oscuro |
+| Espaciado con la escala por defecto de Tailwind | Tokens propios | Tailwind ya usa pasos de 4px (`p-4` = 16px = `space-4`): coincide con la retícula de Cajetín sin redeclarar nada |
+| **Consulta en la URL** (`/buscar?q=&page=`) | Estado local | Se puede compartir, recargar y usar el botón Atrás. La paginación son enlaces reales |
+| `AbortController` por búsqueda + respuesta etiquetada con su consulta | Ignorar respuestas viejas | Una búsqueda nueva cancela la anterior. Además, el estado "cargando" se **deriva** comparando la consulta actual con la de la última respuesta, sin `setState` dentro del efecto (render extra señalado por el linter) |
+| **Resaltado con `<Highlight>`** (segmentos → `<mark>` + texto) | `dangerouslySetInnerHTML` con `<b>` | `ts_headline` no escapa HTML (comprobado). React escapa cada segmento; una prueba verifica que un `<img onerror>` del documento llega como texto |
+| **PDF original en `<iframe>`** (visor nativo del navegador) | PDF.js empaquetado; mostrar el texto extraído | El requisito pide el original embebido. El visor nativo no añade peso al bundle y la API ya sirve `inline` + `Range`. PDF.js queda como mejora si se necesitara un visor homogéneo entre navegadores |
+| **react-markdown sin `rehype-raw`** | `marked` + `innerHTML` | El HTML incrustado en un `.md` no se inserta (probado con `<script>` e `<img onerror>`) y los enlaces `javascript:` se neutralizan |
+| **JWT en `sessionStorage`** | Cookie `httpOnly`; memoria | Sobrevive a recargar la pestaña y se borra al cerrarla. Riesgo asumido: un XSS podría leerlo. Se mitiga al no insertar nunca HTML del documento; una cookie `httpOnly` exigiría protección CSRF propia en la API |
+| `RequireAdmin` + "Cargar" visible solo con sesión | Mostrar y fallar con 401 | La interfaz refleja el permiso real; la API lo hace cumplir de todos modos |
+| Pruebas con Testing Library + `fetch` simulado sobre la **app completa** (rutas + sesión) | Pruebas de componentes aislados | Prueban lo que ve el usuario: roles, textos y enlaces, igual que con un lector de pantalla |
 
 ## 3. Estrategia de tiempo real
 

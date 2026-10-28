@@ -1,0 +1,81 @@
+/*
+ * Tokens del sistema de diseño Cajetín (tokens.json v1).
+ * Fuente: https://claude.ai/artifact/9Wc2oqqftyyNDqfeHxxv1t — un cambio de valor se hace allí y se copia aquí.
+ * Contraste WCAG AA verificado en ambos temas para cada par de texto/fondo que usa la interfaz.
+ */
+:root {
+  color-scheme: light;
+
+  --paper: #f5f7f7;
+  --sheet: #ffffff;
+  --sunken: #eaeeee;
+  --rule: #d5dcdc;
+  --rule-strong: #738080;
+  --ink: #162020;
+  --ink-muted: #4b5958;
+  --accent: #0b6b70;
+  --accent-hover: #08565a;
+  --accent-soft: #dcefef;
+  --on-accent: #ffffff;
+  --focus: var(--accent);
+  --mark: #ffe27a;
+  --on-mark: #162020;
+  --processing: #1d5aa3;
+  --processing-soft: #e2ebf7;
+  --indexed: #1c7343;
+  --indexed-soft: #dff1e6;
+  --error: #b3261e;
+  --error-soft: #fbe5e3;
+  --warning: #855600;
+  --warning-soft: #f4ece4;
+
+  --shadow-raise: 0 1px 2px rgba(22, 32, 32, 0.08);
+  --shadow-overlay: 0 8px 24px rgba(22, 32, 32, 0.16);
+
+  --font-display: "Archivo", "Segoe UI", system-ui, sans-serif;
+  --font-sans: "Atkinson Hyperlegible Next", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Atkinson Hyperlegible Mono", ui-monospace, "Cascadia Code", Menlo, monospace;
+
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
+
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+
+  --page-max: 1120px;
+  --reading-max: 72ch;
+  --control-height: 40px;
+  --control-height-sm: 32px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --paper: #101716;
+    --sheet: #172120;
+    --sunken: #0b1110;
+    --rule: #2b3837;
+    --rule-strong: #71817f;
+    --ink: #e5ecea;
+    --ink-muted: #a2b1af;
+    --accent: #56c2c4;
+    --accent-hover: #7dd3d4;
+    --accent-soft: #103436;
+    --on-accent: #0b1514;
+    --mark: #f0d25a;
+    --on-mark: #1a1600;
+    --processing: #8fb9ef;
+    --processing-soft: #15273d;
+    --indexed: #72cf98;
+    --indexed-soft: #12301f;
+    --error: #f49a91;
+    --error-soft: #3a1714;
+    --warning: #e8b94a;
+    --warning-soft: #33260a;
+
+    --shadow-raise: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.55);
+  }
+}

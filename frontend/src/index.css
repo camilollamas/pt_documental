@@ -1,0 +1,98 @@
+@import "tailwindcss";
+@import "./styles/tokens.css";
+
+/*
+ * Cajetín en Tailwind:
+ * - colores: utilidades por token (bg-paper, text-ink-muted, border-rule-strong…);
+ * - espaciado: la escala por defecto de Tailwind ya es de 4px (p-4 = 16px = space-4);
+ * - radios, sombras y medidas: como variables, p. ej. rounded-(--radius-md), shadow-(--shadow-overlay).
+ */
+@theme inline {
+  --color-paper: var(--paper);
+  --color-sheet: var(--sheet);
+  --color-sunken: var(--sunken);
+  --color-rule: var(--rule);
+  --color-rule-strong: var(--rule-strong);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-on-accent: var(--on-accent);
+  --color-focus: var(--focus);
+  --color-mark: var(--mark);
+  --color-on-mark: var(--on-mark);
+  --color-processing: var(--processing);
+  --color-processing-soft: var(--processing-soft);
+  --color-indexed: var(--indexed);
+  --color-indexed-soft: var(--indexed-soft);
+  --color-error: var(--error);
+  --color-error-soft: var(--error-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+}
+
+@utility font-display {
+  font-family: var(--font-display);
+}
+
+/* Rótulos en mayúsculas del cajetín y de los distintivos (estilo "label"). */
+@utility label-caps {
+  font-family: var(--font-display);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+@layer base {
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 24px;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  mark {
+    background: var(--mark);
+    color: var(--on-mark);
+    padding: 0 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  h1, h2, h3 {
+    text-wrap: balance;
+  }
+}
+
+/* Markdown renderizado (react-markdown genera etiquetas sin clases): componente DocumentViewer de Cajetín. */
+@layer components {
+  .prose-cajetin { color: var(--ink); }
+  .prose-cajetin :where(h1, h2, h3, h4) { font-family: var(--font-display); font-weight: 600; margin: 24px 0 8px; }
+  .prose-cajetin :where(h1) { font-size: 22px; line-height: 28px; margin-top: 0; }
+  .prose-cajetin :where(h2) { font-size: 17px; line-height: 24px; }
+  .prose-cajetin :where(h3, h4) { font-size: 15px; line-height: 24px; }
+  .prose-cajetin :where(p, ul, ol, blockquote, table) { margin: 0 0 12px; }
+  .prose-cajetin :where(ul) { list-style: disc; padding-left: 24px; }
+  .prose-cajetin :where(ol) { list-style: decimal; padding-left: 24px; }
+  .prose-cajetin :where(a) { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+  .prose-cajetin :where(blockquote) { border-left: 2px solid var(--rule-strong); padding-left: 12px; color: var(--ink-muted); }
+  .prose-cajetin :where(code) { font-family: var(--font-mono); font-size: 13px; background: var(--sunken); padding: 1px 4px; border-radius: var(--radius-sm); }
+  .prose-cajetin :where(pre) { font-family: var(--font-mono); font-size: 13px; line-height: 20px; background: var(--paper); padding: 12px 16px; border-radius: var(--radius-md); overflow-x: auto; margin: 0 0 12px; }
+  .prose-cajetin :where(pre code) { background: none; padding: 0; }
+  .prose-cajetin :where(hr) { border: 0; border-top: 1px solid var(--rule); margin: 24px 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
