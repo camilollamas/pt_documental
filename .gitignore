@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.claude
+
+# Secretos y datos subidos: nunca al repositorio
+.env
+storage/

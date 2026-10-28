@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: docs
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-docs_local}
+      POSTGRES_DB: documents
+    ports:
+      - '5432:5432'
+    volumes:
+      # Postgres 18 guarda los datos en /var/lib/postgresql/<versión>/docker; se monta el directorio padre.
+      - postgres-data:/var/lib/postgresql
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U docs -d documents']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:8-alpine
+    # AOF: los trabajos encolados sobreviven a un reinicio de Redis.
+    # noeviction: BullMQ exige que Redis nunca descarte claves por memoria.
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres-data:
+  redis-data:
