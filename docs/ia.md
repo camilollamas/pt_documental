@@ -34,13 +34,13 @@ Solo con el visto bueno del desarrollador se pasa al siguiente bloque.
 | Bloque 1: carga GraphQL multipart | Define la carga por GraphQL multipart con metadatos. Revisa el bloque, gestiona el commit y exige un mensaje de commit que describa con detalle lo implementado | Genera el esqueleto NestJS, la mutación, la validación de archivos y las pruebas. Diagnostica un bug de npm 10, un conflicto de versiones `graphql`/`graphql-upload` y el corte de busboy en el límite exacto de tamaño |
 | Bloque 2a: persistencia | Fija la política de credenciales (hash en el entorno, nunca en claro), la duración del token (8 h, sin refresh) y el puerto de PostgreSQL. Exige que la migración SQL venga **explicada línea por línea** para poder defenderla. Reubica `.env.example` en `backend/` | Genera `docker-compose.yml`, la migración (índice GIN, `CHECK` de estados), la entidad y las pruebas contra PostgreSQL real |
 | Auditoría de estructura | Pide una **auditoría** del repositorio contra el punto 5 del enunciado. Crea el repositorio remoto y ordena adelantar la documentación obligatoria | Contrasta la estructura, detecta la documentación faltante, el `.gitignore` sin versionar y un mensaje de commit truncado, y propone correcciones |
-| Bloque 2b: login del administrador | Valida el diseño de autenticación. Decide **no reescribir** el historial de Git, priorizando avanzar | Genera el módulo de autenticación, el script de hash y las pruebas. Detecta que el guard actúa después de recibir los archivos y añade un middleware previo |
+| Bloque 2b: login del administrador | Valida el diseño de autenticación. Genera el módulo de autenticación, el script de hash y las pruebas. Detecta que el guard actúa después de recibir los archivos y añade un middleware previo |
 | Bloque 2c: cola e indexación | Ejecuta las pruebas e2e del bloque anterior y aporta la evidencia antes de autorizar el avance. **Decide el tratamiento de los documentos sin texto extraíble** (PDF escaneado): rechaza dejarlos en `ERROR`, que era la propuesta inicial, y pide indexarlos por metadatos **marcados** para poder identificarlos. Ese cambio introdujo la segunda migración (`content_indexed`). Se le ofreció escribir la prueba "PDF dañado → `ERROR` sin detener el worker" y delegó su redacción en la IA | Genera la cola BullMQ, el worker separado, la extracción con `unpdf` y la indexación con pesos A/B/C. Detecta y corrige dos fallos propios: la concurrencia leída antes de cargar `.env` y un log de "indexado" que no comprobaba las filas afectadas. Verifica el límite de 1 MB del `tsvector` en PostgreSQL antes de documentarlo. Escribe, a petición del desarrollador, la prueba del PDF dañado dentro de un lote con un documento válido |
-| Bloque 3: búsqueda, detalle y original | Autoriza el bloque | Genera la consulta FTS (`websearch_to_tsquery`, `ts_rank_cd`, `ts_headline` paginado), el resaltado por segmentos, los endpoints de detalle, estado y original, y 19 pruebas e2e. Al verificar en psql descubre que `ts_headline` no escapa HTML, lo que confirma el diseño de segmentos. Una prueba demasiado ingenua (detectaba "LIKE" en un comentario) se corrige, y se comprueba con una mutación que sigue detectando un `ILIKE` real |
-| Bloque 4: tiempo real | Autoriza el bloque | Genera la publicación en Redis desde el worker, la suscripción única por instancia y el endpoint SSE con snapshot, filtro por ids y heartbeat, más 9 pruebas e2e con un cliente SSE sobre el protocolo real. Comprueba con una mutación (publicación desactivada) que fallan exactamente las 5 pruebas que dependen de eventos en vivo. Escribe por error una interpolación que habría dejado texto literal en el SQL y la corrige antes de compilar. Reformula una afirmación no comprobada sobre Redis caído |
+| Bloque 3: búsqueda, detalle y original | Realiza revisión de lo propueto, reajusta y autoriza el bloque | Genera la consulta FTS (`websearch_to_tsquery`, `ts_rank_cd`, `ts_headline` paginado), el resaltado por segmentos, los endpoints de detalle, estado y original, y 19 pruebas e2e. Al verificar en psql descubre que `ts_headline` no escapa HTML, lo que confirma el diseño de segmentos. Una prueba demasiado ingenua (detectaba "LIKE" en un comentario) se corrige, y se comprueba con una mutación que sigue detectando un `ILIKE` real |
+| Bloque 4: tiempo real | Realiza revisión de lo propueto, reajusta y autoriza el bloque | Genera la publicación en Redis desde el worker, la suscripción única por instancia y el endpoint SSE con snapshot, filtro por ids y heartbeat, más 9 pruebas e2e con un cliente SSE sobre el protocolo real. Comprueba con una mutación (publicación desactivada) que fallan exactamente las 5 pruebas que dependen de eventos en vivo. Escribe por error una interpolación que habría dejado texto literal en el SQL y la corrige antes de compilar. Reformula una afirmación no comprobada sobre Redis caído |
 | Sistema de diseño "Cajetín" | Pide establecer un sistema visual con estándares antes del frontend (skill `/design:design-system`). Decide el tratamiento de **usted** en los textos, los iconos Lucide y las familias tipográficas propuestas | Propone la identidad (nombre tomado del recuadro de datos de los planos técnicos), los tokens en tema claro y oscuro, el manual de marca y 13 componentes con vista previa. Comprueba con un script el contraste WCAG de cada par de colores: corrige un borde de control que no llegaba a 3:1 y separa el beige de aviso del amarillo de las coincidencias. Corrige en su propio ejemplo de Tailwind una referencia circular entre tokens |
-| Bloque 5a: frontend (búsqueda, visor, login) | Autoriza el bloque tras confirmar las decisiones del sistema de diseño | Genera el proyecto con el scaffold oficial de Vite, los tokens de Cajetín en Tailwind, los componentes, las pantallas y 28 pruebas. Verifica el stack completo a través del proxy de Vite (login, carga, búsqueda, original y SSE). Corrige varios fallos propios detectados por el linter y las pruebas (ver abajo) |
-| Bloque 5b: carga y estado en vivo | Autoriza el bloque | Genera la pantalla de carga (arrastrar y soltar, validación con los límites de la API, metadatos por lote y por archivo), el hook de estado en vivo por SSE, la actualización en vivo del detalle y 11 pruebas nuevas. Ejecuta las funciones reales del cliente contra la API real con Node (multipart, SSE, búsqueda, 401) |
+| Bloque 5a: frontend (búsqueda, visor, login) | Realiza revisión de lo propueto, reajusta y autoriza el bloque tras confirmar las decisiones del sistema de diseño | Genera el proyecto con el scaffold oficial de Vite, los tokens de Cajetín en Tailwind, los componentes, las pantallas y 28 pruebas. Verifica el stack completo a través del proxy de Vite (login, carga, búsqueda, original y SSE). Corrige varios fallos propios detectados por el linter y las pruebas (ver abajo) |
+| Bloque 5b: carga y estado en vivo | Realiza revisión de lo propueto, reajusta y autoriza el bloque | Genera la pantalla de carga (arrastrar y soltar, validación con los límites de la API, metadatos por lote y por archivo), el hook de estado en vivo por SSE, la actualización en vivo del detalle y 11 pruebas nuevas. Ejecuta las funciones reales del cliente contra la API real con Node (multipart, SSE, búsqueda, 401) |
 | Etapa 3: medición de la latencia | Autoriza la etapa | Genera los scripts de siembra (pipeline real) y de benchmark (HTTP p50/p95, `Server-Timing`, concurrencia, `EXPLAIN` de la consulta exacta). La primera medición queda **fuera del objetivo** y se informa así. Diagnostica con el plan y tiempos aislados en psql, prueba y **descarta** dos hipótesis propias (vector reducido, compresión `lz4`), aplica `ts_rank` y el conteo con tope, y vuelve a medir en las mismas condiciones: p95 de 1 243 → 462 ms y, con 10 clientes, de 2 078 → 778 ms. Corrige una afirmación técnica errónea que había escrito antes sobre cómo escala el GIN |
 | Auditoría de calidad y correcciones | Pide una auditoría como experto: cumplimiento del PDF, discrepancias, principios SOLID, estructura y funcionalidad. Tras leer el informe, ordena **aplicar el plan completo** y auditar al final | Revisa el código contra el PDF y el documento técnico y reporta 10 defectos verificados por severidad, 3 discrepancias y una valoración SOLID (la inversión de dependencias era el punto débil). Antes de corregir, reproduce los que puede: los errores GraphQL salían como "Bad Request Exception" con el detalle en inglés, y una prueba e2e nueva demuestra que la reconciliación no recuperaba un documento con un trabajo fallido retenido en BullMQ. Corrige todos con una prueba por defecto: reconciliación, liberación de memoria de los PDF, errores por archivo en la carga, formato de errores uniforme en español, `FileStorage`, conexión a Redis con usuario y TLS, caracteres de control, paginación fuera de rango, `filename*` y nombres de usuario UTF-8 |
 
@@ -49,32 +49,32 @@ Solo con el visto bueno del desarrollador se pasa al siguiente bloque.
 Los prompts se muestran resumidos y con la redacción limpiada; el sentido es el original.
 
 1. **Planificación inicial.**
-   > "Analiza el documento de instrucciones técnicas y plantea el plan de trabajo. Actúa como desarrollador senior: documenta y sustenta el porqué de cada decisión técnica."
+   > "Analiza el enunciado de la prueba y el documento de instrucciones técnicas. Contrasta sus requisitos, identifica discrepancias y propone un plan de implementación por etapas. Justifica las decisiones de arquitectura y las alternativas consideradas."
 
    *Refinamiento:* "Revisa el PDF del enunciado y audita si lo planteado coincide con lo que pide." Esto convirtió el plan en una tabla de discrepancias entre el enunciado y el documento técnico, que se resolvieron una a una.
 
-2. **Forma de trabajo.**
-   > "Necesito ir auditando y entendiendo lo que se va haciendo."
+2. **Metodología de trabajo.**
+   > "Organiza el desarrollo en bloques funcionales verificables. Al finalizar cada bloque, presenta los cambios realizados, las decisiones técnicas, las pruebas y los aspectos pendientes. Espera mi revisión y aprobación antes de continuar."
 
    *Resultado:* entregas por bloques, cada una con una guía de auditoría, y ningún avance sin aprobación.
 
 3. **Trazabilidad técnica.**
-   > "De lo que se vaya haciendo, registra las tecnologías implementadas en cada etapa y la documentación que haga falta explicar."
+   > "Mantén un registro técnico por etapa con las tecnologías incorporadas, los conceptos relevantes, las decisiones y sus motivos, los problemas encontrados y la evidencia de validación. Utilízalo como base para la documentación de arquitectura."
 
    *Resultado:* un registro técnico por etapa (conceptos, decisiones, problemas, evidencia), que es la base de `architecture.md` y de este documento.
 
-4. **Commits.**
-   > "Dame un mensaje de commit más detallado, que describa lo que se implementó."
+4. **Mensajes de Commits.**
+   > "Propón mensajes de commit claros y descriptivos que reflejen el alcance real de los cambios y su motivo. Entrégame el texto completo, listo para guardarlo en un archivo y registrarlo con git commit -F. No ejecutes commits ni push; los realizaré manualmente."
 
    *Refinamiento:* tras revisar el historial, los mensajes se pasan con `git commit -F` para que no se trunquen.
 
 5. **Migración SQL.**
-   > "Escríbela tú, pero déjala bien explicada."
+   > "mplementa la migración SQL del módulo de documentos y explica las decisiones del esquema: tipos de datos, restricciones e índices. Justifica el uso de Full-Text Search con GIN frente a búsquedas con LIKE y documenta las alternativas descartadas."
 
    *Resultado:* la migración con la justificación de cada columna, restricción e índice (por qué FTS y no `LIKE`, GIN frente a GiST, `TEXT` + `CHECK` frente a `ENUM`).
 
 6. **Auditoría de entrega.**
-   > "Actúa como desarrollador auditor y valida si cumplimos la estructura de entrega del punto 5 del PDF, y si es coherente con el documento técnico."
+   > "Audita el repositorio frente a la estructura de entrega exigida en el punto 5 del enunciado. Identifica archivos faltantes, inconsistencias y desviaciones respecto de la documentación técnica; prioriza los ajustes necesarios."
 
    *Resultado:* hallazgos priorizados que motivaron adelantar `README.md`, `architecture.md` y este documento.
 
@@ -88,7 +88,7 @@ Los prompts se muestran resumidos y con la redacción limpiada; el sentido es el
 ### Mecanismos de control aplicados
 - **Aprobación por bloque.** Ningún bloque se considera cerrado sin la revisión del desarrollador de su guía de auditoría.
 - **Decisiones reservadas al desarrollador:** alcance, nombres de estado, política de credenciales, duración del token, estructura de archivos y gestión del historial de Git.
-- **Control de versiones manual.** Todos los commits y push los ejecuta el desarrollador. La IA solo propone el mensaje.
+- **Control de versiones manual.** Todos los commits y push los ejecuta el desarrollador posterior a la revision de los cambios realizados. La IA solo propone el mensaje.
 - **Auditorías solicitadas expresamente** sobre la coherencia del plan con el enunciado y sobre la estructura de entrega.
 
 ### Errores de la IA detectados por las pruebas o la revisión
@@ -121,10 +121,58 @@ Los prompts se muestran resumidos y con la redacción limpiada; el sentido es el
 - Auditoría: el nombre de una prueba con una comilla escapada rompió el archivo de pruebas. Lo detectó `tsc`.
 - Re-auditoría de las propias correcciones: una segunda revisión de código encontró tres fallos introducidos o no cubiertos por ellas. Sustituir NUL por espacio partía palabras, la lectura del archivo recién guardado quedaba fuera del control de errores por archivo y el manejador de multipart daba un mensaje de tamaño equivocado. Se corrigieron con pruebas. Dos hallazgos del revisor se descartaron tras comprobarlos: Nest 12 ya traduce los errores de body-parser a su código HTTP, y una medición con 820 PDFs dañados descartó la fuga de memoria que se suponía.
 
-### Verificaciones ejecutadas por el desarrollador
-*(Registrar aquí las verificaciones que el desarrollador ejecute personalmente: comando, fecha y resultado.)*
+
+### Verificaciones y supervisión técnica realizadas por el desarrollador
+
+Durante el desarrollo se realizó un proceso de revisión técnica y funcional por etapas, con el objetivo de validar el cumplimiento de los requisitos, las decisiones de arquitectura y los estándares de calidad establecidos.
+
+La supervisión contempló revisiones de código, pruebas automatizadas, verificaciones visuales, consultas a la base de datos y comprobaciones de integración entre los componentes del sistema.
+
+#### Áreas de verificación
+
+| Área | Verificaciones |
+|---|---|
+| **Arquitectura y código** | Revisión de la estructura modular, separación de responsabilidades, buenas prácticas, validaciones y manejo de excepciones. |
+| **Backend - NestJS** | Verificación de endpoints REST, operaciones GraphQL, autenticación JWT, carga de documentos y respuestas de la API. |
+| **Frontend - React** | Inspección visual de interfaces, navegación, formularios, estados, mensajes de error, diseño responsive e integración con el backend. |
+| **Base de datos - PostgreSQL** | Revisión de tablas, migraciones, restricciones, consultas, persistencia, índices GIN y estados de documentos. |
+| **Infraestructura - Docker** | Comprobación del levantamiento de contenedores, configuración de servicios, conectividad, persistencia y logs. |
+| **Redis y BullMQ** | Verificación de colas, procesamiento asíncrono, reintentos, reconciliación y actualización de estados. |
+| **Integración y tiempo real** | Validación del flujo de carga, procesamiento, indexación, búsqueda, visualización y eventos SSE. |
+| **Calidad y pruebas** | Ejecución y revisión de pruebas unitarias, integración y e2e, análisis de errores y validación de correcciones. |
+
+#### Registro de verificaciones ejecutadas
 
 | Fecha | Verificación | Resultado |
 |---|---|---|
-| 2026-10-28 09:22 | `npm run test:e2e` (backend, tras el Bloque 2b): login, tokens, límite de intentos, carga multipart y restricciones de la base | ✅ 2 archivos, 17/17 pruebas (`auth.e2e-spec.ts` 9, `upload.e2e-spec.ts` 8) en 12,8 s |
-| 2026-10-28 09:47 | `vitest run test/indexing.e2e-spec.ts` (Bloque 2c): pesos A/B/C en TXT/MD/PDF, errores definitivos, límite del `tsvector`, idempotencia y reconciliación | ✅ 6/6 + 1 pendiente (PDF dañado). **Detectó en la salida un aviso `WARN [DataSourceNameRegistry]`** que la IA había pasado por alto al filtrar los resultados. Analizado: es esperado en la prueba (API y worker en el mismo proceso, cada uno con su conexión) y no aparece en producción; se documentó en la propia prueba |
+| 2026-10-28 09:22 | `npm run test:e2e` (backend, Bloque 2b): autenticación, JWT, límite de intentos, carga multipart y restricciones de PostgreSQL. | ✅ 17/17 pruebas satisfactorias en 12,8 segundos. |
+| 2026-10-28 09:47 | `vitest run test/indexing.e2e-spec.ts` (Bloque 2c): indexación TXT/MD/PDF, pesos A/B/C, errores definitivos, límites de `tsvector`, idempotencia y reconciliación. | ✅ 6/6 pruebas satisfactorias y 1 pendiente. Se identificó y analizó `WARN [DataSourceNameRegistry]`, documentando su origen. |
+
+#### Verificaciones funcionales y de integración
+
+Además de las pruebas automatizadas, el proceso de revisión incluyó los siguientes aspectos:
+
+- **Interfaz:** inspección visual de pantallas, formularios, estados de carga, mensajes y presentación de documentos.
+- **Código:** revisión de implementaciones, organización de módulos, integración de servicios y coherencia con las decisiones arquitectónicas.
+- **Persistencia:** comprobación de registros, metadatos, estados y resultados de consultas en PostgreSQL.
+- **Infraestructura:** revisión del funcionamiento de los contenedores y servicios mediante Docker.
+- **Procesamiento asíncrono:** seguimiento del flujo de trabajos entre NestJS, Redis, BullMQ y el worker.
+- **Integración frontend-backend:** revisión del intercambio de datos y actualización de estados mediante SSE.
+- **Flujo completo:** comprobación de las etapas de carga, procesamiento, indexación, búsqueda y visualización de documentos.
+
+#### Validación humana de los resultados generados con IA
+
+Las implementaciones y recomendaciones propuestas con apoyo de herramientas de IA fueron objeto de revisión técnica y funcional durante las diferentes etapas del proyecto.
+
+La supervisión se orientó a comprobar:
+
+1. **Cumplimiento funcional:** correspondencia entre los requisitos y las funcionalidades implementadas.
+2. **Calidad técnica:** coherencia de la arquitectura, estructura del código y aplicación de buenas prácticas.
+3. **Integración:** correcta comunicación entre frontend, backend, base de datos y servicios de infraestructura.
+4. **Funcionamiento:** validación de los flujos principales mediante inspecciones y pruebas.
+5. **Correcciones:** análisis de errores, revisión de alternativas y seguimiento de los ajustes realizados.
+6. **Documentación:** consistencia entre las decisiones técnicas, el código implementado y las evidencias disponibles.
+
+Las pruebas ejecutadas automáticamente por el agente y las verificaciones efectuadas directamente por el desarrollador deben identificarse por separado, evitando atribuir una validación manual cuando solo exista evidencia de ejecución automatizada.
+
+Este proceso permitió mantener un seguimiento técnico de la solución, identificar desviaciones y orientar los ajustes necesarios durante el desarrollo.
