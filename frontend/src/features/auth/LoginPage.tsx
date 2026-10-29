@@ -3,6 +3,7 @@ import { Navigate, useLocation, useNavigate } from 'react-router';
 import { Alert } from '../../components/Alert';
 import { Button } from '../../components/Button';
 import { Field } from '../../components/Field';
+import { ApiError } from '../../services/api';
 import { useAuth } from './auth-context';
 
 /** Login del administrador único. No hay registro ni recuperación de contraseña. */
@@ -10,7 +11,7 @@ export function LoginPage() {
   const { session, expired, login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; status: number } | null>(null);
   const [busy, setBusy] = useState(false);
 
   // Vuelve a la página protegida que pidió el login (p. ej. /cargar).
@@ -26,7 +27,7 @@ export function LoginPage() {
       await login(String(form.get('username')), String(form.get('password')));
       navigate(from, { replace: true });
     } catch (err) {
-      setError((err as Error).message);
+      setError({ message: (err as Error).message, status: err instanceof ApiError ? err.status : 0 });
     } finally {
       setBusy(false);
     }
@@ -44,8 +45,9 @@ export function LoginPage() {
         </Alert>
       )}
       {error && (
-        <Alert tone="error" title={error}>
-          Revise el usuario y la contraseña. Tras 5 intentos fallidos deberá esperar un minuto.
+        <Alert tone="error" title={error.message}>
+          {/* La pista solo tiene sentido si el problema son las credenciales. */}
+          {error.status === 401 && 'Revise el usuario y la contraseña. Tras 5 intentos fallidos deberá esperar un minuto.'}
         </Alert>
       )}
       <form onSubmit={onSubmit} className="grid gap-4">

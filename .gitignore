@@ -7,3 +7,6 @@ coverage/
 # Secretos y datos subidos: nunca al repositorio
 .env
 storage/
+
+# Archivos de prueba manual (generados localmente)
+muestras/

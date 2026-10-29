@@ -59,13 +59,24 @@ async function ensureOk(res: Response): Promise<Response> {
 }
 
 function fallbackMessage(status: number): string {
-  if (status === 404) return 'El documento no existe o fue eliminado.';
+  // La API siempre acompaña sus 404 de un mensaje; uno sin cuerpo viene de otro servidor (proxy mal dirigido).
+  if (status === 404) return 'El servidor no reconoce esta operación. Compruebe que la API está en marcha y que la interfaz apunta a ella.';
   if (status === 429) return 'Demasiados intentos. Espere un minuto y vuelva a intentarlo.';
   return 'No se pudo completar la operación. Compruebe la conexión e inténtelo de nuevo.';
 }
 
+/** fetch con el fallo de red en español ("Failed to fetch" no le dice nada al usuario). */
+async function send(input: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch (error) {
+    if ((error as Error).name === 'AbortError') throw error;
+    throw new ApiError('No se pudo conectar con el servidor. Compruebe que la API está en marcha e inténtelo de nuevo.', 0);
+  }
+}
+
 export async function login(username: string, password: string) {
-  const res = await fetch('/api/auth/login', {
+  const res = await send('/api/auth/login', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ username, password }),
@@ -79,12 +90,12 @@ export async function searchDocuments(
   signal?: AbortSignal,
 ): Promise<SearchResponse> {
   const params = new URLSearchParams({ query, page: String(page), pageSize: '10' });
-  const res = await fetch(`/api/documents?${params}`, { signal }).then(ensureOk);
+  const res = await send(`/api/documents?${params}`, { signal }).then(ensureOk);
   return res.json();
 }
 
 export async function getDocument(id: string, signal?: AbortSignal): Promise<DocumentDetail> {
-  const res = await fetch(`/api/documents/${encodeURIComponent(id)}`, { signal }).then(ensureOk);
+  const res = await send(`/api/documents/${encodeURIComponent(id)}`, { signal }).then(ensureOk);
   return res.json();
 }
 
@@ -108,7 +119,7 @@ export type StatusEvent = {
 
 export async function getUploadLimits(signal?: AbortSignal): Promise<UploadLimits> {
   // JSON (no multipart): la protección CSRF de Apollo no exige cabecera de preflight aquí.
-  const res = await fetch('/graphql', {
+  const res = await send('/graphql', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ query: '{ uploadLimits { maxFileBytes maxFiles allowedExtensions } }' }),
@@ -132,7 +143,7 @@ export async function uploadDocuments(token: string, files: File[], documents: D
   body.append('map', JSON.stringify(Object.fromEntries(files.map((_, i) => [String(i), [`variables.files.${i}`]]))));
   files.forEach((file, i) => body.append(String(i), file, file.name));
 
-  const res = await fetch('/graphql', {
+  const res = await send('/graphql', {
     method: 'POST',
     // apollo-require-preflight: sin ella Apollo rechaza el multipart (protección CSRF).
     headers: { authorization: `Bearer ${token}`, 'apollo-require-preflight': 'true' },
@@ -147,6 +158,6 @@ export async function uploadDocuments(token: string, files: File[], documents: D
 }
 
 export async function getOriginalText(id: string, signal?: AbortSignal): Promise<string> {
-  const res = await fetch(originalUrl(id), { signal }).then(ensureOk);
+  const res = await send(originalUrl(id), { signal }).then(ensureOk);
   return res.text();
 }

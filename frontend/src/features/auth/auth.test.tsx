@@ -56,7 +56,31 @@ describe('Sesión del administrador', () => {
     await userEvent.type(screen.getByLabelText('Contraseña'), 'mala');
     await userEvent.click(screen.getByRole('button', { name: 'Iniciar sesión' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Credenciales inválidas');
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Credenciales inválidas');
+    expect(alert).toHaveTextContent('Revise el usuario y la contraseña');
+  });
+
+  it('un 404 sin mensaje (proxy hacia otro servidor) no habla de documentos ni de credenciales', async () => {
+    mockFetch((url) => (url === '/api/auth/login' ? new Response('Not Found', { status: 404 }) : undefined));
+    renderApp('/login');
+    await userEvent.type(screen.getByLabelText('Usuario'), 'admin');
+    await userEvent.type(screen.getByLabelText('Contraseña'), 'clave');
+    await userEvent.click(screen.getByRole('button', { name: 'Iniciar sesión' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('El servidor no reconoce esta operación');
+    expect(alert).not.toHaveTextContent('Revise el usuario');
+  });
+
+  it('sin conexión con la API muestra un mensaje en español', async () => {
+    mockFetch((url) => (url === '/api/auth/login' ? Promise.reject(new TypeError('Failed to fetch')) : undefined));
+    renderApp('/login');
+    await userEvent.type(screen.getByLabelText('Usuario'), 'admin');
+    await userEvent.type(screen.getByLabelText('Contraseña'), 'clave');
+    await userEvent.click(screen.getByRole('button', { name: 'Iniciar sesión' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo conectar con el servidor');
   });
 
   it('cerrar sesión quita "Cargar" y la sesión guardada', async () => {

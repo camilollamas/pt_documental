@@ -89,8 +89,22 @@ Vite reenvía `/api` y `/graphql` a la API (proxy), así que el navegador habla 
 
 ```bash
 # backend/.env → PORT=3100
-API_URL=http://localhost:3100 npm run dev     # PowerShell: $env:API_URL="http://localhost:3100"; npm run dev
+# frontend/.env.local → API_URL=http://localhost:3100   (copiar de frontend/.env.example; ignorado por Git)
+npm run dev
 ```
+
+También vale solo para una terminal: `API_URL=http://localhost:3100 npm run dev` (PowerShell: `$env:API_URL="http://localhost:3100"; npm run dev`).
+
+**Problemas frecuentes al arrancar**
+
+| Lo que ve | Causa | Solución |
+|---|---|---|
+| Login: "El servidor no reconoce esta operación…" | Vite reenvía a un puerto donde responde **otra aplicación** (la API acompaña siempre sus 404 de un mensaje) | Arrancar la API en otro puerto y Vite con `API_URL` (arriba) |
+| Login: "No se pudo conectar con el servidor…" | La API no está en marcha | `npm run start:dev` en `backend/` |
+| La API no arranca y menciona `JWT_SECRET` o `ADMIN_PASSWORD_HASH` | Falta `backend/.env` o esos valores | Paso 2 (`cp .env.example .env`, `hash-password`, secreto) |
+| Login: "Credenciales inválidas" | Contraseña distinta de la del hash | Generar otro hash con `npm run hash-password` y reiniciar la API |
+
+**Conectarse a la base de datos** (pgAdmin, DBeaver, `psql`): host `localhost` (`host.docker.internal` si el cliente también corre en Docker), puerto `5432`, base `documents`, usuario `docs`, contraseña `docs_local` (o el `POSTGRES_PASSWORD` definido para Docker Compose). La tabla principal es `documents`.
 
 | Pantalla | Ruta | Acceso |
 |---|---|---|
