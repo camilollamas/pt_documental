@@ -43,14 +43,22 @@ cp .env.example .env
 npx npm@11 install
 ```
 
-Configura el administrador en `backend/.env`. Sin estos valores la API no arranca:
+**Credenciales por defecto (solo desarrollo local):** con el `.env` copiado de la plantilla, el administrador es
+
+| Usuario | Contraseña |
+|---|---|
+| `admin` | `administrador123` |
+
+`.env.example` trae ya el hash bcrypt de esa contraseña y un `JWT_SECRET` de ejemplo, así que la API arranca sin más pasos. Ambos son **públicos** (están en el repositorio): fuera de una prueba local, cámbielos:
 
 ```bash
-npm run hash-password      # pide la contraseña (mín. 12 caracteres) sin mostrarla
-                           # → copia la línea ADMIN_PASSWORD_HASH='...' en .env
+npm run hash-password      # pide la nueva contraseña (mín. 12 caracteres) sin mostrarla
+                           # → sustituye la línea ADMIN_PASSWORD_HASH='...' en .env
 node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"
-                           # → úsalo como JWT_SECRET en .env
+                           # → sustituye JWT_SECRET en .env
 ```
+
+Reinicie la API después de cambiarlos.
 
 Arranca la API y el worker de indexación en **dos terminales**:
 

@@ -94,7 +94,7 @@ Los prompts se muestran resumidos y con la redacción limpiada; el sentido es el
 ### Errores de la IA detectados por las pruebas o la revisión
 - La prueba del umbral de tamaño detectó que un archivo de exactamente 10 MB se rechazaba (busboy corta al alcanzar el límite). Se corrigió.
 - Una aserción de prueba no comprobaba nada (`length >= 0`) y se reemplazó por una real.
-- El valor de ejemplo de `JWT_SECRET` en `.env.example` habría superado la validación de longitud y permitido arrancar con un secreto público. Ahora se deja vacío.
+- El valor de ejemplo de `JWT_SECRET` en `.env.example` habría superado la validación de longitud y permitido arrancar con un secreto público. Ahora se deja vacío. Más adelante, el desarrollador decidió poner en la plantilla credenciales de desarrollo (`admin` / `administrador123`) y un secreto de ejemplo para que el proyecto arranque sin pasos extra. Es un riesgo asumido y documentado: los valores son públicos y el README indica cambiarlos fuera de una prueba local.
 - Dos afirmaciones de la documentación técnica no estaban comprobadas y se matizaron para que solo digan lo verificado.
 - Una prueba manual dejó una fila en la base de datos de la demo, y se eliminó.
 - La concurrencia del worker se leía en un decorador, que se evalúa antes de cargar `.env`, así que el valor configurado se ignoraba. Ahora se fija al arrancar.

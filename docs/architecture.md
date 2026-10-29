@@ -134,6 +134,7 @@ El enunciado define el actor de HU-01 como "Administrador / Desarrollador" y el 
 | Decisión | Alternativa | Motivo |
 |---|---|---|
 | Credenciales en el entorno: `ADMIN_USERNAME` + `ADMIN_PASSWORD_HASH` | Tabla `users` con semilla | Con un solo usuario, una tabla añade migración, semilla y CRUD sin aportar nada. Si se necesitaran más usuarios, se pasaría a tabla |
+| `.env.example` con credenciales de desarrollo (`admin` / `administrador123`, en hash) y un `JWT_SECRET` de ejemplo (*decisión del propietario*) | Plantilla vacía que obliga a configurarlas | El evaluador arranca el proyecto sin pasos extra. Riesgo asumido: son valores públicos. El README indica cambiarlos fuera de una prueba local |
 | **Hash bcrypt** (`bcryptjs`, coste 12) en el `.env`, nunca la contraseña en claro | argon2 (nativo), `crypto.scrypt` | El kata pide bcrypt o argon2. `bcryptjs` es JavaScript puro: no necesita scripts de instalación nativos, que npm 11 pide aprobar explícitamente (`allowScripts`, observado al instalar `@apollo/protobufjs`) y que suelen dar problemas de compilación en Windows. Mismo formato `$2b$` que bcrypt |
 | `npm run hash-password` lee la contraseña **sin eco** | Pasarla como argumento | Un argumento queda en el historial de la shell y en la lista de procesos |
 | Hash entre comillas simples en `.env` | Sin comillas | El hash contiene `$`, y las comillas simples evitan que se interprete como variable. Verificado con `process.loadEnvFile`; con Docker Compose se verificará al dockerizar la API |
